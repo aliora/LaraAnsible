@@ -15,14 +15,12 @@ class Inventory extends Model
         'username',
         'keystore_id',
         'variables',
-        'is_active',
         'source_type',
         'dynamic_child_id',
     ];
 
     protected $casts = [
         'variables' => 'array',
-        'is_active' => 'boolean',
         'port' => 'integer',
     ];
 

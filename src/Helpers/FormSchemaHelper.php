@@ -65,4 +65,20 @@ class FormSchemaHelper
     }
 
 
+    /**
+     * Format a string for display as a label.
+     * Converts "table_names" to "Table Name" and "column_names" to "Column Name".
+     */
+    public static function formatLabel(?string $text, string $default = ''): string
+    {
+        if (blank($text)) {
+            return $default;
+        }
+
+        return \Illuminate\Support\Str::title(
+            \Illuminate\Support\Str::replace('_', ' ',
+                \Illuminate\Support\Str::singular($text)
+            )
+        );
+    }
 }

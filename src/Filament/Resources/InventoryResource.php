@@ -65,8 +65,7 @@ class InventoryResource extends Resource
                                     ])
                                     ->required(),
                             ]),
-                        Forms\Components\Toggle::make('is_active')
-                            ->default(true),
+
                     ])
                     ->columns(2),
             ]);
@@ -74,42 +73,46 @@ class InventoryResource extends Resource
 
     public static function table(Table $table): Table
     {
+        $setting = \VisioSoft\LaraAnsible\Models\AnsibleSetting::getInstance();
+        
+        $parentLabel = FormSchemaHelper::formatLabel($setting?->parent_table, 'Bağlı Olduğu Kaynak');
+        $childLabel = FormSchemaHelper::formatLabel($setting?->child_table, 'Cihaz Adı');
+        $hostnameLabel = FormSchemaHelper::formatLabel($setting?->child_hostname_column, 'IP/Hostname');
+
         return $table
             ->columns([
                 Tables\Columns\TextColumn::make('name')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->label($childLabel),
                 Tables\Columns\TextColumn::make('hostname')
                     ->searchable()
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('port')
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('username')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('keystore.name')
-                    ->label('Keystore')
-                    ->searchable()
-                    ->sortable(),
-                Tables\Columns\IconColumn::make('is_active')
-                    ->boolean()
-                    ->sortable(),
+                    ->sortable()
+                    ->label($hostnameLabel),
+                Tables\Columns\TextColumn::make('parent_name')
+                    ->label($parentLabel)
+                    ->state(function (Inventory $record) use ($setting) {
+                         if ($record->source_type === 'dynamic' && $setting && $setting->parent_table && $record->dynamic_child_id) {
+                             $parent = \Illuminate\Support\Facades\DB::table($setting->parent_table)
+                                 ->where('id', $record->dynamic_child_id)
+                                 ->first();
+                             $labelColumn = $setting->parent_label_column ?? 'name';
+                             return $parent ? ($parent->{$labelColumn} ?? 'Bilinmiyor') : 'Bulunamadı';
+                         }
+                         return 'Atanmamış';
+                    }),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->filters([
-                Tables\Filters\TernaryFilter::make('is_active')
-                    ->label('Active Status')
-                    ->placeholder('All servers')
-                    ->trueLabel('Active servers')
-                    ->falseLabel('Inactive servers'),
-            ])
+            ->filters([])
             ->actions([
                 Actions\Action::make('quick_run')
                     ->label('Hızlı Çalıştır')
                     ->icon('heroicon-o-play')
                     ->color('success')
+                    ->button()
                     ->modalHeading('Görev Çalıştır')
                     ->modalDescription(fn (Inventory $record): string => "'{$record->name}' cihazında görev çalıştır")
                     ->form([
@@ -121,11 +124,11 @@ class InventoryResource extends Resource
                             $data['task_template_id']
                         );
                     }),
-                Actions\ViewAction::make(),
-                Actions\EditAction::make(),
+                Actions\EditAction::make()
+                    ->button(),
             ])
             ->bulkActions([
-                Tables\Actions\BulkAction::make('quick_run')
+                Actions\BulkAction::make('quick_run')
                     ->label('Hızlı Çalıştır')
                     ->icon('heroicon-o-play')
                     ->color('success')
@@ -141,7 +144,7 @@ class InventoryResource extends Resource
                         );
                     })
                     ->deselectRecordsAfterCompletion(),
-                Tables\Actions\DeleteBulkAction::make(),
+                Actions\DeleteBulkAction::make(),
             ]);
     }
 
