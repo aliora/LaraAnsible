@@ -192,7 +192,51 @@ class AnsibleService
             $command .= ' --extra-vars '.escapeshellarg($extraVars);
         }
 
-        // Add extra CLI arguments from deployment
+        // Add check/test flags (--syntax-check, --check, --diff, --list-tasks)
+        if ($deployment->cli_check_flags) {
+            foreach ($deployment->cli_check_flags as $flag) {
+                $command .= ' ' . $flag;
+            }
+        }
+
+        // Add target flags (--become)
+        if ($deployment->cli_target_flags) {
+            foreach ($deployment->cli_target_flags as $flag) {
+                $command .= ' ' . $flag;
+            }
+        }
+
+        // Add --limit
+        if ($deployment->cli_limit) {
+            $command .= ' --limit ' . escapeshellarg($deployment->cli_limit);
+        }
+
+        // Add --tags
+        if ($deployment->cli_tags) {
+            $command .= ' --tags ' . escapeshellarg($deployment->cli_tags);
+        }
+
+        // Add --skip-tags
+        if ($deployment->cli_skip_tags) {
+            $command .= ' --skip-tags ' . escapeshellarg($deployment->cli_skip_tags);
+        }
+
+        // Add --start-at-task
+        if ($deployment->cli_start_at_task) {
+            $command .= ' --start-at-task ' . escapeshellarg($deployment->cli_start_at_task);
+        }
+
+        // Add --forks
+        if ($deployment->cli_forks) {
+            $command .= ' --forks ' . (int) $deployment->cli_forks;
+        }
+
+        // Add verbosity level (-v, -vv, -vvv, -vvvv)
+        if ($deployment->cli_verbosity) {
+            $command .= ' ' . $deployment->cli_verbosity;
+        }
+
+        // Add extra CLI arguments from deployment (freeform)
         if ($deployment->extra_args) {
             $command .= ' ' . trim($deployment->extra_args);
         }
