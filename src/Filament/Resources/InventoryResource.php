@@ -2,29 +2,31 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources;
 
-use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
-use VisioSoft\LaraAnsible\Models\Inventory;
+use Filament\Actions;
 use Filament\Forms;
-use Filament\Forms\Form;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
+use VisioSoft\LaraAnsible\Models\Inventory;
 
 class InventoryResource extends Resource
 {
     protected static ?string $model = Inventory::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-server';
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-server';
 
-    protected static ?string $navigationGroup = 'Ansible Management';
+    protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
 
     protected static ?int $navigationSort = 1;
 
-    public static function form(Form $form): Form
+    public static function form(Schema $schema): Schema
     {
-        return $form
+        return $schema
             ->schema([
-                Forms\Components\Section::make('Server Details')
+                Section::make('Server Details')
                     ->schema([
                         Forms\Components\TextInput::make('name')
                             ->required()
@@ -101,17 +103,15 @@ class InventoryResource extends Resource
                     ->falseLabel('Inactive servers'),
             ])
             ->actions([
-                Tables\Actions\ViewAction::make(),
-                Tables\Actions\EditAction::make(),
+                Actions\ViewAction::make(),
+                Actions\EditAction::make(),
             ])
             ->bulkActions([]);
     }
 
     public static function getRelations(): array
     {
-        return [
-            //
-        ];
+        return [];
     }
 
     public static function getPages(): array
@@ -119,6 +119,7 @@ class InventoryResource extends Resource
         return [
             'index' => Pages\ListInventories::route('/'),
             'create' => Pages\CreateInventory::route('/create'),
+            'view' => Pages\ViewInventory::route('/{record}'),
             'edit' => Pages\EditInventory::route('/{record}/edit'),
         ];
     }

@@ -2,32 +2,34 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources;
 
+use Filament\Actions;
+use Filament\Forms;
+use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
+use Filament\Tables;
+use Filament\Tables\Table;
+use Illuminate\Support\HtmlString;
 use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource\Pages;
 use VisioSoft\LaraAnsible\Jobs\ExecuteAnsibleDeployment;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Models\Inventory;
-use Filament\Forms;
-use Filament\Forms\Form;
-use Filament\Resources\Resource;
-use Filament\Tables;
-use Filament\Tables\Table;
-use Illuminate\Support\HtmlString;
 
 class DeploymentResource extends Resource
 {
     protected static ?string $model = Deployment::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-rocket-launch';
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-rocket-launch';
 
-    protected static ?string $navigationGroup = 'Ansible Management';
+    protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
 
     protected static ?int $navigationSort = 5;
 
-    public static function form(Form $form): Form
+    public static function form(Schema $schema): Schema
     {
-        return $form
+        return $schema
             ->schema([
-                Forms\Components\Section::make('Deployment Configuration')
+                Section::make('Deployment Configuration')
                     ->schema([
                         Forms\Components\Select::make('task_template_id')
                             ->relationship('taskTemplate', 'name')
@@ -35,8 +37,28 @@ class DeploymentResource extends Resource
                             ->searchable()
                             ->preload()
                             ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment),
+                        Forms\Components\Select::make('inventory_file')
+                            ->label('Inventory File')
+                            ->options(function () {
+                                $directory = config('laraansible.inventory_directory', base_path('ansible'));
+                                if (! is_dir($directory)) {
+                                    return [];
+                                }
+                                $files = glob($directory . '/*.ini') ?: [];
+                                $files = array_merge($files, glob($directory . '/*.yml') ?: []);
+                                $files = array_merge($files, glob($directory . '/*.yaml') ?: []);
+                                $options = [];
+                                foreach ($files as $file) {
+                                    $basename = basename($file);
+                                    $options[$file] = $basename;
+                                }
+                                return $options;
+                            })
+                            ->searchable()
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Select an inventory file from the configured directory (optional, overrides server selection)'),
                         Forms\Components\CheckboxList::make('inventory_ids')
-                            ->label('Servers')
+                            ->label('Servers (Database)')
                             ->options(function () {
                                 $options = ['all' => 'All Servers'];
                                 $inventories = Inventory::where('is_active', true)->pluck('name', 'id')->toArray();
@@ -44,19 +66,83 @@ class DeploymentResource extends Resource
                                 return $options + $inventories;
                             })
                             ->columns(2)
-                            ->required()
                             ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
                             ->afterStateUpdated(function ($state, callable $set) {
-                                // If 'all' is selected, deselect individual servers
                                 if (is_array($state) && in_array('all', $state)) {
                                     $set('inventory_ids', ['all']);
                                 }
                             })
-                            ->reactive(),
+                            ->reactive()
+                            ->helperText('Select from database inventories (used if no file selected)'),
                     ])
                     ->columns(2)
                     ->compact(),
-                Forms\Components\Section::make('Execution Details')
+                Section::make('CLI Arguments')
+                    ->schema([
+                        Forms\Components\CheckboxList::make('cli_check_flags')
+                            ->label('Kontrol ve Test')
+                            ->options([
+                                '--syntax-check' => '--syntax-check (YAML syntax kontrolü)',
+                                '--check' => '-C / --check (Dry-run simülasyon)',
+                                '--diff' => '-D / --diff (Değişiklikleri göster)',
+                                '--list-tasks' => '--list-tasks (Görevleri listele)',
+                            ])
+                            ->columns(2)
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment),
+                        Forms\Components\CheckboxList::make('cli_target_flags')
+                            ->label('Hedef ve Akış')
+                            ->options([
+                                '--become' => '-b / --become (Sudo ile çalıştır)',
+                            ])
+                            ->columns(2)
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment),
+                        Forms\Components\TextInput::make('cli_limit')
+                            ->label('-l / --limit')
+                            ->placeholder('host1,host2 veya group_name')
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Belirli sunucu/grup ile sınırla'),
+                        Forms\Components\TextInput::make('cli_tags')
+                            ->label('-t / --tags')
+                            ->placeholder('deploy,setup')
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Sadece bu etiketli görevleri çalıştır'),
+                        Forms\Components\TextInput::make('cli_skip_tags')
+                            ->label('--skip-tags')
+                            ->placeholder('slow,optional')
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Bu etiketli görevleri atla'),
+                        Forms\Components\TextInput::make('cli_start_at_task')
+                            ->label('--start-at-task')
+                            ->placeholder('Task Name')
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Bu görevden başla'),
+                        Forms\Components\TextInput::make('cli_forks')
+                            ->label('-f / --forks')
+                            ->placeholder('5')
+                            ->numeric()
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Paralel sunucu sayısı'),
+                        Forms\Components\Select::make('cli_verbosity')
+                            ->label('Verbose Level')
+                            ->options([
+                                '-v' => '-v (Verbose)',
+                                '-vv' => '-vv (More Verbose)',
+                                '-vvv' => '-vvv (Debug)',
+                                '-vvvv' => '-vvvv (Connection Debug)',
+                            ])
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Çıktı detay seviyesi'),
+                        Forms\Components\Textarea::make('extra_args')
+                            ->label('Ek CLI Argümanları')
+                            ->rows(2)
+                            ->columnSpanFull()
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Yukarıda olmayan ek argümanlar'),
+                    ])
+                    ->columns(2)
+                    ->collapsible()
+                    ->collapsed(fn (?Deployment $record) => $record !== null),
+                Section::make('Execution Details')
                     ->schema([
                         Forms\Components\Placeholder::make('status')
                             ->label('Status')
@@ -107,7 +193,7 @@ class DeploymentResource extends Resource
                     ->columns(4)
                     ->compact()
                     ->hidden(fn (?Deployment $record) => $record === null),
-                Forms\Components\Section::make('Command Input')
+                Section::make('Command Input')
                     ->schema([
                         Forms\Components\Textarea::make('command_input')
                             ->label('')
@@ -118,7 +204,7 @@ class DeploymentResource extends Resource
                     ->collapsed()
                     ->compact()
                     ->hidden(fn (?Deployment $record) => $record === null || empty($record->command_input)),
-                Forms\Components\Section::make('Command Output')
+                Section::make('Command Output')
                     ->schema([
                         Forms\Components\Textarea::make('command_output')
                             ->label('')
@@ -201,7 +287,7 @@ class DeploymentResource extends Resource
                     ->label('Task Template'),
             ])
             ->actions([
-                Tables\Actions\Action::make('execute')
+                Actions\Action::make('execute')
                     ->icon('heroicon-o-play')
                     ->color('success')
                     ->action(function (Deployment $record) {
@@ -212,21 +298,19 @@ class DeploymentResource extends Resource
                     })
                     ->visible(fn (Deployment $record) => $record->status === 'pending')
                     ->requiresConfirmation(),
-                Tables\Actions\ViewAction::make(),
-                Tables\Actions\DeleteAction::make(),
+                Actions\ViewAction::make(),
+                Actions\DeleteAction::make(),
             ])
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                Actions\BulkActionGroup::make([
+                    Actions\DeleteBulkAction::make(),
                 ]),
             ]);
     }
 
     public static function getRelations(): array
     {
-        return [
-            //
-        ];
+        return [];
     }
 
     public static function getPages(): array
@@ -234,6 +318,7 @@ class DeploymentResource extends Resource
         return [
             'index' => Pages\ListDeployments::route('/'),
             'create' => Pages\CreateDeployment::route('/create'),
+            'view' => Pages\ViewDeployment::route('/{record}'),
             'edit' => Pages\EditDeployment::route('/{record}/edit'),
         ];
     }

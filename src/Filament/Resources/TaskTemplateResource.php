@@ -2,29 +2,31 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources;
 
-use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource\Pages;
-use VisioSoft\LaraAnsible\Models\TaskTemplate;
+use Filament\Actions;
 use Filament\Forms;
-use Filament\Forms\Form;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource\Pages;
+use VisioSoft\LaraAnsible\Models\TaskTemplate;
 
 class TaskTemplateResource extends Resource
 {
     protected static ?string $model = TaskTemplate::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-document-text';
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-document-text';
 
-    protected static ?string $navigationGroup = 'Ansible Management';
+    protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
 
     protected static ?int $navigationSort = 2;
 
-    public static function form(Form $form): Form
+    public static function form(Schema $schema): Schema
     {
-        return $form
+        return $schema
             ->schema([
-                Forms\Components\Section::make('Template Details')
+                Section::make('Template Details')
                     ->schema([
                         Forms\Components\TextInput::make('name')
                             ->required()
@@ -32,18 +34,41 @@ class TaskTemplateResource extends Resource
                         Forms\Components\Textarea::make('description')
                             ->rows(3)
                             ->columnSpanFull(),
-                        // Removed 'type' field - only playbooks are supported now
                         Forms\Components\Toggle::make('is_active')
                             ->default(true),
                     ])
                     ->columns(2),
-                Forms\Components\Section::make('Playbook Configuration')
+                Section::make('Playbook Configuration')
                     ->schema([
+                        Forms\Components\Select::make('playbook_path')
+                            ->label('Playbook File')
+                            ->options(function () {
+                                $directory = config('laraansible.playbook_directory', base_path('ansible'));
+                                if (! is_dir($directory)) {
+                                    return [];
+                                }
+                                $files = glob($directory . '/*.yml') ?: [];
+                                $files = array_merge($files, glob($directory . '/*.yaml') ?: []);
+                                $options = [];
+                                foreach ($files as $file) {
+                                    $basename = basename($file);
+                                    $options[$file] = $basename;
+                                }
+                                return $options;
+                            })
+                            ->searchable()
+                            ->helperText('Select a playbook file from the configured directory'),
                         Forms\Components\Textarea::make('playbook_content')
-                            ->label('Playbook Content')
+                            ->label('Playbook Content (Optional)')
                             ->rows(10)
                             ->columnSpanFull()
-                            ->helperText('Paste the playbook content here'),
+                            ->helperText('Optionally paste playbook content here. If both file and content are provided, content takes precedence.'),
+                        Forms\Components\KeyValue::make('extra_vars')
+                            ->label('Extra Variables')
+                            ->keyLabel('Variable Name')
+                            ->valueLabel('Value')
+                            ->columnSpanFull()
+                            ->helperText('Add extra variables to pass to ansible-playbook with --extra-vars'),
                     ]),
             ]);
     }
@@ -71,22 +96,20 @@ class TaskTemplateResource extends Resource
                 Tables\Filters\TernaryFilter::make('is_active'),
             ])
             ->actions([
-                Tables\Actions\ViewAction::make(),
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
+                Actions\ViewAction::make(),
+                Actions\EditAction::make(),
+                Actions\DeleteAction::make(),
             ])
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                Actions\BulkActionGroup::make([
+                    Actions\DeleteBulkAction::make(),
                 ]),
             ]);
     }
 
     public static function getRelations(): array
     {
-        return [
-            //
-        ];
+        return [];
     }
 
     public static function getPages(): array
@@ -94,6 +117,7 @@ class TaskTemplateResource extends Resource
         return [
             'index' => Pages\ListTaskTemplates::route('/'),
             'create' => Pages\CreateTaskTemplate::route('/create'),
+            'view' => Pages\ViewTaskTemplate::route('/{record}'),
             'edit' => Pages\EditTaskTemplate::route('/{record}/edit'),
         ];
     }

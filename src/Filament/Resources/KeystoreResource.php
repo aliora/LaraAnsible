@@ -2,29 +2,32 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources;
 
-use VisioSoft\LaraAnsible\Filament\Resources\KeystoreResource\Pages;
-use VisioSoft\LaraAnsible\Models\Keystore;
+use Filament\Actions;
 use Filament\Forms;
-use Filament\Forms\Form;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use VisioSoft\LaraAnsible\Filament\Resources\KeystoreResource\Pages;
+use VisioSoft\LaraAnsible\Models\Keystore;
 
 class KeystoreResource extends Resource
 {
     protected static ?string $model = Keystore::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-key';
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-key';
 
-    protected static ?string $navigationGroup = 'Ansible Management';
+    protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
 
     protected static ?int $navigationSort = 3;
 
-    public static function form(Form $form): Form
+    public static function form(Schema $schema): Schema
     {
-        return $form
+        return $schema
             ->schema([
-                Forms\Components\Section::make('Keystore Details')
+                Section::make('Keystore Details')
                     ->schema([
                         Forms\Components\TextInput::make('name')
                             ->required()
@@ -42,7 +45,7 @@ class KeystoreResource extends Resource
                             ->live(),
                     ])
                     ->columns(2),
-                Forms\Components\Section::make('SSH Key Configuration')
+                Section::make('SSH Key Configuration')
                     ->schema([
                         Forms\Components\Textarea::make('private_key')
                             ->label('Private Key')
@@ -59,15 +62,15 @@ class KeystoreResource extends Resource
                             ->revealable()
                             ->helperText('If your key is encrypted with a passphrase'),
                     ])
-                    ->visible(fn (Forms\Get $get) => $get('type') === 'ssh'),
-                Forms\Components\Section::make('Password Configuration')
+                    ->visible(fn (Get $get) => $get('type') === 'ssh'),
+                Section::make('Password Configuration')
                     ->schema([
                         Forms\Components\TextInput::make('password')
                             ->password()
                             ->revealable()
-                            ->required(fn (Forms\Get $get) => $get('type') === 'password'),
+                            ->required(fn (Get $get) => $get('type') === 'password'),
                     ])
-                    ->visible(fn (Forms\Get $get) => $get('type') === 'password'),
+                    ->visible(fn (Get $get) => $get('type') === 'password'),
             ]);
     }
 
@@ -105,22 +108,20 @@ class KeystoreResource extends Resource
                     ]),
             ])
             ->actions([
-                Tables\Actions\ViewAction::make(),
-                Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
+                Actions\ViewAction::make(),
+                Actions\EditAction::make(),
+                Actions\DeleteAction::make(),
             ])
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                Actions\BulkActionGroup::make([
+                    Actions\DeleteBulkAction::make(),
                 ]),
             ]);
     }
 
     public static function getRelations(): array
     {
-        return [
-            //
-        ];
+        return [];
     }
 
     public static function getPages(): array
@@ -128,6 +129,7 @@ class KeystoreResource extends Resource
         return [
             'index' => Pages\ListKeystores::route('/'),
             'create' => Pages\CreateKeystore::route('/create'),
+            'view' => Pages\ViewKeystore::route('/{record}'),
             'edit' => Pages\EditKeystore::route('/{record}/edit'),
         ];
     }

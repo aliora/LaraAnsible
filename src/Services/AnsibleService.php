@@ -95,15 +95,20 @@ class AnsibleService
     }
 
     /**
-     * Create temporary inventory file
+     * Create temporary inventory file or use existing inventory file
      */
     protected function createInventoryFile(Deployment $deployment): string
     {
+        // If an inventory file is specified, use it directly
+        if ($deployment->inventory_file && file_exists($deployment->inventory_file)) {
+            return $deployment->inventory_file;
+        }
+
         $inventoryIds = $deployment->inventory_ids ?? [];
 
         // If 'all' is selected, get all active inventories
         if (in_array('all', $inventoryIds)) {
-            $inventories = Inventory::where('is_active',true)->get();
+            $inventories = Inventory::where('is_active', true)->get();
         } else {
             $inventories = Inventory::whereIn('id', $inventoryIds)->get();
         }
@@ -185,6 +190,11 @@ class AnsibleService
         if ($deployment->taskTemplate->extra_vars) {
             $extraVars = json_encode($deployment->taskTemplate->extra_vars);
             $command .= ' --extra-vars '.escapeshellarg($extraVars);
+        }
+
+        // Add extra CLI arguments from deployment
+        if ($deployment->extra_args) {
+            $command .= ' ' . trim($deployment->extra_args);
         }
 
         return [
