@@ -49,12 +49,33 @@ class AnsibleService
 
             // Execute the command with streaming output
             $outputBuffer = '';
+            $processedHosts = 0;
+            $totalHosts = $deployment->total_hosts ?: 1;
+
             // Use an unlimited timeout to allow long-running Ansible playbooks
-            $result = Process::forever()->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, $deployment) {
+            $result = Process::forever()->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, &$processedHosts, $totalHosts, $deployment) {
                 $outputBuffer .= $output;
-                // Update deployment with partial output for real-time viewing
+
+                // Parse Ansible output to track progress
+                // Look for patterns like "ok: [hostname]" or "changed: [hostname]" or "PLAY RECAP"
+                if (preg_match_all('/(?:ok|changed|failed|unreachable):\s*\[([^\]]+)\]/', $output, $matches)) {
+                    $processedHosts += count(array_unique($matches[1]));
+                }
+
+                // Calculate progress percentage
+                $progress = min(100, (int) (($processedHosts / max(1, $totalHosts)) * 100));
+
+                // If we see PLAY RECAP, we're at 100%
+                if (str_contains($output, 'PLAY RECAP')) {
+                    $progress = 100;
+                    $processedHosts = $totalHosts;
+                }
+
+                // Update deployment with partial output and progress for real-time viewing
                 $deployment->update([
                     'command_output' => $outputBuffer,
+                    'progress' => $progress,
+                    'processed_hosts' => min($processedHosts, $totalHosts),
                 ]);
             });
 
@@ -156,9 +177,9 @@ class AnsibleService
                                 // Create a temporary Inventory object or array structure
                                 $inventory = new Inventory;
                                 $inventory->hostname = $child->{$setting->child_hostname_column} ?? null;
-                                // Use mapped columns or fallback to defaults
-                                $inventory->port = $setting->child_port_column ? ($child->{$setting->child_port_column} ?? 22) : 22;
-                                $inventory->username = $setting->child_username_column ? ($child->{$setting->child_username_column} ?? null) : null;
+                                // Use direct SSH settings
+                                $inventory->port = $setting->ssh_port ?? 22;
+                                $inventory->username = $setting->ssh_username ?? 'root';
 
                                 // Dynamic items don't have a keystore relation unless we add logic for it.
                                 // For now, we assume they rely on SSH agent, passwordless access, or provided arguments.

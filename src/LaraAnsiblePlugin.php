@@ -4,7 +4,8 @@ namespace VisioSoft\LaraAnsible;
 
 use Filament\Contracts\Plugin;
 use Filament\Panel;
-use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource;
+use VisioSoft\LaraAnsible\Filament\Pages\ManageAnsibleSettings;
+use VisioSoft\LaraAnsible\Filament\Pages\OnGoingTasksPage;
 use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 use VisioSoft\LaraAnsible\Filament\Resources\KeystoreResource;
 use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource;
@@ -25,7 +26,10 @@ class LaraAnsiblePlugin implements Plugin
                 InventoryResource::class,
                 TaskTemplateResource::class,
                 KeystoreResource::class,
-                DeploymentResource::class,
+            ])
+            ->pages([
+                OnGoingTasksPage::class,
+                ManageAnsibleSettings::class,
             ])
             ->widgets([
                 DeploymentStatsWidget::class,

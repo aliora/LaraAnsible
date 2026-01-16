@@ -10,7 +10,10 @@ use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
 use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
+use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
 use VisioSoft\LaraAnsible\Models\Inventory;
+use VisioSoft\LaraAnsible\Services\DeploymentService;
+use Illuminate\Database\Eloquent\Collection;
 
 class InventoryResource extends Resource
 {
@@ -103,10 +106,43 @@ class InventoryResource extends Resource
                     ->falseLabel('Inactive servers'),
             ])
             ->actions([
+                Actions\Action::make('quick_run')
+                    ->label('Hızlı Çalıştır')
+                    ->icon('heroicon-o-play')
+                    ->color('success')
+                    ->modalHeading('Görev Çalıştır')
+                    ->modalDescription(fn (Inventory $record): string => "'{$record->name}' cihazında görev çalıştır")
+                    ->form([
+                        FormSchemaHelper::taskTemplateSelect(),
+                    ])
+                    ->action(function (Inventory $record, array $data): void {
+                        app(DeploymentService::class)->createWithInventoryIds(
+                            [$record->id],
+                            $data['task_template_id']
+                        );
+                    }),
                 Actions\ViewAction::make(),
                 Actions\EditAction::make(),
             ])
-            ->bulkActions([]);
+            ->bulkActions([
+                Tables\Actions\BulkAction::make('quick_run')
+                    ->label('Hızlı Çalıştır')
+                    ->icon('heroicon-o-play')
+                    ->color('success')
+                    ->modalHeading('Toplu Görev Çalıştır')
+                    ->modalDescription(fn (Collection $records): string => $records->count() . ' cihaz seçildi')
+                    ->form([
+                        FormSchemaHelper::taskTemplateSelect(),
+                    ])
+                    ->action(function (Collection $records, array $data): void {
+                        app(DeploymentService::class)->createWithInventoryIds(
+                            $records->pluck('id')->toArray(),
+                            $data['task_template_id']
+                        );
+                    })
+                    ->deselectRecordsAfterCompletion(),
+                Tables\Actions\DeleteBulkAction::make(),
+            ]);
     }
 
     public static function getRelations(): array

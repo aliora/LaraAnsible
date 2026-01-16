@@ -23,6 +23,7 @@ class LaraAnsibleServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        $this->loadViewsFrom(__DIR__.'/../resources/views', 'laraansible');
 
         $this->publishes([
             __DIR__.'/../config/laraansible.php' => config_path('laraansible.php'),
@@ -31,5 +32,11 @@ class LaraAnsibleServiceProvider extends ServiceProvider
         $this->publishes([
             __DIR__.'/../database/migrations' => database_path('migrations'),
         ], 'laraansible-migrations');
+
+        $this->publishes([
+            __DIR__.'/../resources/views' => resource_path('views/vendor/laraansible'),
+        ], 'laraansible-views');
+
+        \Livewire\Livewire::component('terminal-viewer', \VisioSoft\LaraAnsible\Livewire\TerminalViewer::class);
     }
 }

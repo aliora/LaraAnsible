@@ -16,6 +16,8 @@ class Inventory extends Model
         'keystore_id',
         'variables',
         'is_active',
+        'source_type',
+        'dynamic_child_id',
     ];
 
     protected $casts = [
@@ -23,6 +25,11 @@ class Inventory extends Model
         'is_active' => 'boolean',
         'port' => 'integer',
     ];
+
+    /**
+     * Virtual attribute for dynamic inventory version tracking.
+     */
+    public ?string $current_version = null;
 
     public function keystore(): BelongsTo
     {

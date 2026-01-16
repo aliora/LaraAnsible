@@ -26,6 +26,9 @@ class Deployment extends Model
         'started_at',
         'completed_at',
         'exit_code',
+        'progress',
+        'total_hosts',
+        'processed_hosts',
     ];
 
     protected $casts = [
@@ -35,6 +38,9 @@ class Deployment extends Model
         'completed_at' => 'datetime',
         'exit_code' => 'integer',
         'forks' => 'integer',
+        'progress' => 'integer',
+        'total_hosts' => 'integer',
+        'processed_hosts' => 'integer',
     ];
 
     public function taskTemplate(): BelongsTo
@@ -45,5 +51,13 @@ class Deployment extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(config('auth.providers.users.model', 'App\Models\User'));
+    }
+
+    /**
+     * Get the inventory items count for display.
+     */
+    public function getInventoryCountAttribute(): int
+    {
+        return is_array($this->inventory_ids) ? count($this->inventory_ids) : 0;
     }
 }
