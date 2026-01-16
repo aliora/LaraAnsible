@@ -2,9 +2,9 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource\Pages;
 
+use Filament\Resources\Pages\CreateRecord;
 use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource;
 use VisioSoft\LaraAnsible\Jobs\ExecuteAnsibleDeployment;
-use Filament\Resources\Pages\CreateRecord;
 
 class CreateDeployment extends CreateRecord
 {

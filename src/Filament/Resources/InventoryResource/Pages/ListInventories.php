@@ -2,9 +2,9 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
 
-use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
+use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 
 class ListInventories extends ListRecords
 {

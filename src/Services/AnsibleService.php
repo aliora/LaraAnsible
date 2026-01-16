@@ -2,11 +2,12 @@
 
 namespace VisioSoft\LaraAnsible\Services;
 
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Process;
+use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Models\Inventory;
 use VisioSoft\LaraAnsible\Models\Keystore;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Process;
 
 class AnsibleService
 {
@@ -105,12 +106,73 @@ class AnsibleService
         }
 
         $inventoryIds = $deployment->inventory_ids ?? [];
+        $staticInventoryIds = [];
+        $dynamicInventoryIds = [];
 
-        // If 'all' is selected, get all active inventories
-        if (in_array('all', $inventoryIds)) {
-            $inventories = Inventory::where('is_active', true)->get();
-        } else {
-            $inventories = Inventory::whereIn('id', $inventoryIds)->get();
+        // Separate static and dynamic IDs
+        foreach ($inventoryIds as $id) {
+            if ($id === 'all') {
+                $staticInventoryIds = ['all'];
+                // For dynamic, we need to fetch all from settings if 'all' is supported there,
+                // but currently 'all' usually means all static servers.
+                // Let's assume 'all' only applies to static for backward compatibility or handle it if needed.
+                // For now, if 'all' is selected, we get all static.
+                // If users want all dynamic, they can select all groups.
+                break;
+            }
+
+            if (is_string($id) && str_starts_with($id, 'dynamic_')) {
+                $dynamicInventoryIds[] = $id;
+            } else {
+                $staticInventoryIds[] = $id;
+            }
+        }
+
+        $inventories = collect();
+
+        // 1. Handle Static Inventories
+        if (! empty($staticInventoryIds)) {
+            if (in_array('all', $staticInventoryIds)) {
+                $inventories = Inventory::where('is_active', true)->get();
+            } else {
+                $inventories = Inventory::whereIn('id', $staticInventoryIds)->get();
+            }
+        }
+
+        // 2. Handle Dynamic Inventories
+        if (! empty($dynamicInventoryIds)) {
+            $setting = AnsibleSetting::getActive();
+            if ($setting && $setting->child_table) {
+                foreach ($dynamicInventoryIds as $dynamicId) {
+                    // key format: dynamic_{child_id}_{hostname}
+                    // We only need child_id to look up the record again to be safe and get fresh data
+                    $parts = explode('_', $dynamicId);
+                    if (count($parts) >= 3) {
+                        $childId = $parts[1];
+
+                        try {
+                            $child = \DB::table($setting->child_table)->find($childId);
+                            if ($child) {
+                                // Create a temporary Inventory object or array structure
+                                $inventory = new Inventory;
+                                $inventory->hostname = $child->{$setting->child_hostname_column} ?? null;
+                                // Use mapped columns or fallback to defaults
+                                $inventory->port = $setting->child_port_column ? ($child->{$setting->child_port_column} ?? 22) : 22;
+                                $inventory->username = $setting->child_username_column ? ($child->{$setting->child_username_column} ?? null) : null;
+
+                                // Dynamic items don't have a keystore relation unless we add logic for it.
+                                // For now, we assume they rely on SSH agent, passwordless access, or provided arguments.
+
+                                if ($inventory->hostname) {
+                                    $inventories->push($inventory);
+                                }
+                            }
+                        } catch (\Exception $e) {
+                            Log::warning("AnsibleService: Failed to fetch dynamic inventory item {$dynamicId}: ".$e->getMessage());
+                        }
+                    }
+                }
+            }
         }
 
         $content = "[all]\n";
@@ -192,53 +254,46 @@ class AnsibleService
             $command .= ' --extra-vars '.escapeshellarg($extraVars);
         }
 
-        // Add check/test flags (--syntax-check, --check, --diff, --list-tasks)
-        if ($deployment->cli_check_flags) {
-            foreach ($deployment->cli_check_flags as $flag) {
-                $command .= ' ' . $flag;
+        // Add CLI flags from checkboxes
+        if ($deployment->cli_flags && is_array($deployment->cli_flags)) {
+            foreach ($deployment->cli_flags as $flag) {
+                $command .= ' '.$flag;
             }
         }
 
-        // Add target flags (--become)
-        if ($deployment->cli_target_flags) {
-            foreach ($deployment->cli_target_flags as $flag) {
-                $command .= ' ' . $flag;
-            }
+        // Add limit hosts
+        if ($deployment->limit_hosts) {
+            $command .= ' --limit '.escapeshellarg($deployment->limit_hosts);
         }
 
-        // Add --limit
-        if ($deployment->cli_limit) {
-            $command .= ' --limit ' . escapeshellarg($deployment->cli_limit);
+        // Add tags
+        if ($deployment->tags) {
+            $command .= ' --tags '.escapeshellarg($deployment->tags);
         }
 
-        // Add --tags
-        if ($deployment->cli_tags) {
-            $command .= ' --tags ' . escapeshellarg($deployment->cli_tags);
+        // Add skip-tags
+        if ($deployment->skip_tags) {
+            $command .= ' --skip-tags '.escapeshellarg($deployment->skip_tags);
         }
 
-        // Add --skip-tags
-        if ($deployment->cli_skip_tags) {
-            $command .= ' --skip-tags ' . escapeshellarg($deployment->cli_skip_tags);
+        // Add forks
+        if ($deployment->forks) {
+            $command .= ' --forks '.intval($deployment->forks);
         }
 
-        // Add --start-at-task
-        if ($deployment->cli_start_at_task) {
-            $command .= ' --start-at-task ' . escapeshellarg($deployment->cli_start_at_task);
+        // Add start-at-task
+        if ($deployment->start_at_task) {
+            $command .= ' --start-at-task '.escapeshellarg($deployment->start_at_task);
         }
 
-        // Add --forks
-        if ($deployment->cli_forks) {
-            $command .= ' --forks ' . (int) $deployment->cli_forks;
+        // Add remote user
+        if ($deployment->remote_user) {
+            $command .= ' --user '.escapeshellarg($deployment->remote_user);
         }
 
-        // Add verbosity level (-v, -vv, -vvv, -vvvv)
-        if ($deployment->cli_verbosity) {
-            $command .= ' ' . $deployment->cli_verbosity;
-        }
-
-        // Add extra CLI arguments from deployment (freeform)
+        // Add extra CLI arguments from deployment
         if ($deployment->extra_args) {
-            $command .= ' ' . trim($deployment->extra_args);
+            $command .= ' '.trim($deployment->extra_args);
         }
 
         return [

@@ -2,14 +2,14 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Widgets;
 
-use VisioSoft\LaraAnsible\Models\Deployment;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
+use VisioSoft\LaraAnsible\Models\Deployment;
 
 class LatestDeployments extends BaseWidget
 {
-    protected int | string | array $columnSpan = 'full';
+    protected int|string|array $columnSpan = 'full';
 
     protected static ?int $sort = 2;
 

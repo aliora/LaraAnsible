@@ -2,9 +2,9 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource\Pages;
 
-use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
+use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource;
 
 class ListDeployments extends ListRecords
 {

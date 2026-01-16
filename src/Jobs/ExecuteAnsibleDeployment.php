@@ -2,12 +2,12 @@
 
 namespace VisioSoft\LaraAnsible\Jobs;
 
-use VisioSoft\LaraAnsible\Models\Deployment;
-use VisioSoft\LaraAnsible\Services\AnsibleService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use VisioSoft\LaraAnsible\Models\Deployment;
+use VisioSoft\LaraAnsible\Services\AnsibleService;
 
 class ExecuteAnsibleDeployment implements ShouldQueue
 {

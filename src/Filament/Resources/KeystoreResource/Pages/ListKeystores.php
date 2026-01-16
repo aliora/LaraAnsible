@@ -2,9 +2,9 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\KeystoreResource\Pages;
 
-use VisioSoft\LaraAnsible\Filament\Resources\KeystoreResource;
 use Filament\Actions;
 use Filament\Resources\Pages\ListRecords;
+use VisioSoft\LaraAnsible\Filament\Resources\KeystoreResource;
 
 class ListKeystores extends ListRecords
 {

@@ -47,13 +47,14 @@ class TaskTemplateResource extends Resource
                                 if (! is_dir($directory)) {
                                     return [];
                                 }
-                                $files = glob($directory . '/*.yml') ?: [];
-                                $files = array_merge($files, glob($directory . '/*.yaml') ?: []);
+                                $files = glob($directory.'/*.yml') ?: [];
+                                $files = array_merge($files, glob($directory.'/*.yaml') ?: []);
                                 $options = [];
                                 foreach ($files as $file) {
                                     $basename = basename($file);
                                     $options[$file] = $basename;
                                 }
+
                                 return $options;
                             })
                             ->searchable()

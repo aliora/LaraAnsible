@@ -2,9 +2,9 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource\Pages;
 
-use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource;
 use Filament\Actions;
 use Filament\Resources\Pages\EditRecord;
+use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource;
 
 class EditDeployment extends EditRecord
 {

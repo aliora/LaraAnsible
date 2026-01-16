@@ -2,8 +2,8 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource\Pages;
 
-use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource;
 use Filament\Resources\Pages\CreateRecord;
+use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource;
 
 class CreateTaskTemplate extends CreateRecord
 {

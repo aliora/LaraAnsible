@@ -2,8 +2,8 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
 
-use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 use Filament\Resources\Pages\CreateRecord;
+use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 
 class CreateInventory extends CreateRecord
 {

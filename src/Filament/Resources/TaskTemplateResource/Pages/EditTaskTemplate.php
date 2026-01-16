@@ -2,9 +2,9 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource\Pages;
 
-use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource;
 use Filament\Actions;
 use Filament\Resources\Pages\EditRecord;
+use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource;
 
 class EditTaskTemplate extends EditRecord
 {

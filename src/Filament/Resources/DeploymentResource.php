@@ -12,6 +12,7 @@ use Filament\Tables\Table;
 use Illuminate\Support\HtmlString;
 use VisioSoft\LaraAnsible\Filament\Resources\DeploymentResource\Pages;
 use VisioSoft\LaraAnsible\Jobs\ExecuteAnsibleDeployment;
+use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Models\Inventory;
 
@@ -44,104 +45,78 @@ class DeploymentResource extends Resource
                                 if (! is_dir($directory)) {
                                     return [];
                                 }
-                                $files = glob($directory . '/*.ini') ?: [];
-                                $files = array_merge($files, glob($directory . '/*.yml') ?: []);
-                                $files = array_merge($files, glob($directory . '/*.yaml') ?: []);
+                                $files = glob($directory.'/*.ini') ?: [];
+                                $files = array_merge($files, glob($directory.'/*.yml') ?: []);
+                                $files = array_merge($files, glob($directory.'/*.yaml') ?: []);
                                 $options = [];
                                 foreach ($files as $file) {
                                     $basename = basename($file);
                                     $options[$file] = $basename;
                                 }
+
                                 return $options;
                             })
                             ->searchable()
                             ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Select an inventory file from the configured directory (optional, overrides server selection)'),
-                        Forms\Components\CheckboxList::make('inventory_ids')
-                            ->label('Servers (Database)')
+                            ->helperText('Inventory dosyasından seç (dosya seçilirse, sunucu seçimi devre dışı kalır)'),
+                        Forms\Components\Select::make('inventory_ids')
+                            ->label('Sunucular')
+                            ->multiple()
+                            ->searchable()
                             ->options(function () {
-                                $options = ['all' => 'All Servers'];
-                                $inventories = Inventory::where('is_active', true)->pluck('name', 'id')->toArray();
+                                $options = ['all' => '🔥 Tümünü Seç'];
 
-                                return $options + $inventories;
-                            })
-                            ->columns(2)
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->afterStateUpdated(function ($state, callable $set) {
-                                if (is_array($state) && in_array('all', $state)) {
-                                    $set('inventory_ids', ['all']);
+                                // Get static inventories from database
+                                $staticInventories = Inventory::where('is_active', true)->get();
+                                if ($staticInventories->isNotEmpty()) {
+                                    $staticOptions = [];
+                                    foreach ($staticInventories as $inventory) {
+                                        $staticOptions[$inventory->id] = "{$inventory->name} ({$inventory->hostname})";
+                                    }
+                                    $options['Kayıtlı Sunucular'] = $staticOptions;
                                 }
+
+                                // Get dynamic inventories from settings
+                                $setting = AnsibleSetting::getActive();
+                                if ($setting) {
+                                    $dynamicOptions = $setting->getGroupedInventoryOptions();
+                                    foreach ($dynamicOptions as $group => $items) {
+                                        $options[$group] = $items;
+                                    }
+                                }
+
+                                return $options;
                             })
-                            ->reactive()
-                            ->helperText('Select from database inventories (used if no file selected)'),
+                            ->columnSpanFull()
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Sunucuları seçin veya "Tümünü Seç" ile hepsini ekleyin'),
+                        Forms\Components\Select::make('cli_flags')
+                            ->label('CLI Seçenekleri')
+                            ->multiple()
+                            ->searchable()
+                            ->options([
+                                'Kontrol ve Test' => [
+                                    '--syntax-check' => 'YAML yazım hatalarını kontrol et',
+                                    '--check' => 'Simülasyon (dry-run) - değişiklik yapmadan göster',
+                                    '--diff' => 'Yapılacak değişikliklerin farklarını göster',
+                                    '--list-tasks' => 'Playbook görevlerini listele',
+                                ],
+                                'Yetki ve Bağlantı' => [
+                                    '--become' => 'Root/sudo olarak çalıştır',
+                                    '--ask-become-pass' => 'Sudo parolasını sor',
+                                ],
+                                'Detay Seviyesi' => [
+                                    '-v' => 'Detaylı çıktı',
+                                    '-vv' => 'Daha detaylı çıktı',
+                                    '-vvv' => 'En detaylı çıktı (debug)',
+                                ],
+                            ])
+                            ->columnSpanFull()
+                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
+                            ->helperText('Kategoriden seçenek seçin'),
                     ])
                     ->columns(2)
                     ->compact(),
-                Section::make('CLI Arguments')
-                    ->schema([
-                        Forms\Components\CheckboxList::make('cli_check_flags')
-                            ->label('Kontrol ve Test')
-                            ->options([
-                                '--syntax-check' => '--syntax-check (YAML syntax kontrolü)',
-                                '--check' => '-C / --check (Dry-run simülasyon)',
-                                '--diff' => '-D / --diff (Değişiklikleri göster)',
-                                '--list-tasks' => '--list-tasks (Görevleri listele)',
-                            ])
-                            ->columns(2)
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment),
-                        Forms\Components\CheckboxList::make('cli_target_flags')
-                            ->label('Hedef ve Akış')
-                            ->options([
-                                '--become' => '-b / --become (Sudo ile çalıştır)',
-                            ])
-                            ->columns(2)
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment),
-                        Forms\Components\TextInput::make('cli_limit')
-                            ->label('-l / --limit')
-                            ->placeholder('host1,host2 veya group_name')
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Belirli sunucu/grup ile sınırla'),
-                        Forms\Components\TextInput::make('cli_tags')
-                            ->label('-t / --tags')
-                            ->placeholder('deploy,setup')
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Sadece bu etiketli görevleri çalıştır'),
-                        Forms\Components\TextInput::make('cli_skip_tags')
-                            ->label('--skip-tags')
-                            ->placeholder('slow,optional')
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Bu etiketli görevleri atla'),
-                        Forms\Components\TextInput::make('cli_start_at_task')
-                            ->label('--start-at-task')
-                            ->placeholder('Task Name')
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Bu görevden başla'),
-                        Forms\Components\TextInput::make('cli_forks')
-                            ->label('-f / --forks')
-                            ->placeholder('5')
-                            ->numeric()
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Paralel sunucu sayısı'),
-                        Forms\Components\Select::make('cli_verbosity')
-                            ->label('Verbose Level')
-                            ->options([
-                                '-v' => '-v (Verbose)',
-                                '-vv' => '-vv (More Verbose)',
-                                '-vvv' => '-vvv (Debug)',
-                                '-vvvv' => '-vvvv (Connection Debug)',
-                            ])
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Çıktı detay seviyesi'),
-                        Forms\Components\Textarea::make('extra_args')
-                            ->label('Ek CLI Argümanları')
-                            ->rows(2)
-                            ->columnSpanFull()
-                            ->disabled(fn ($livewire) => $livewire instanceof Pages\EditDeployment)
-                            ->helperText('Yukarıda olmayan ek argümanlar'),
-                    ])
-                    ->columns(2)
-                    ->collapsible()
-                    ->collapsed(fn (?Deployment $record) => $record !== null),
                 Section::make('Execution Details')
                     ->schema([
                         Forms\Components\Placeholder::make('status')

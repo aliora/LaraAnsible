@@ -2,11 +2,11 @@
 
 namespace VisioSoft\LaraAnsible\Filament\Widgets;
 
+use Filament\Widgets\StatsOverviewWidget as BaseWidget;
+use Filament\Widgets\StatsOverviewWidget\Stat;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Models\Inventory;
 use VisioSoft\LaraAnsible\Models\TaskTemplate;
-use Filament\Widgets\StatsOverviewWidget as BaseWidget;
-use Filament\Widgets\StatsOverviewWidget\Stat;
 
 class DeploymentStatsWidget extends BaseWidget
 {
@@ -22,7 +22,7 @@ class DeploymentStatsWidget extends BaseWidget
                 ->descriptionIcon('heroicon-o-document-text')
                 ->color('primary'),
             Stat::make('Total Deployments', Deployment::count())
-                ->description(Deployment::where('status', 'success')->count() . ' successful')
+                ->description(Deployment::where('status', 'success')->count().' successful')
                 ->descriptionIcon('heroicon-o-rocket-launch')
                 ->color('info'),
             Stat::make('Running Deployments', Deployment::where('status', 'running')->count())

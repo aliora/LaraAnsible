@@ -15,14 +15,13 @@ class Deployment extends Model
         'status',
         'command_input',
         'extra_args',
-        'cli_check_flags',
-        'cli_target_flags',
-        'cli_limit',
-        'cli_tags',
-        'cli_skip_tags',
-        'cli_start_at_task',
-        'cli_forks',
-        'cli_verbosity',
+        'cli_flags',
+        'limit_hosts',
+        'tags',
+        'skip_tags',
+        'forks',
+        'start_at_task',
+        'remote_user',
         'command_output',
         'started_at',
         'completed_at',
@@ -31,12 +30,11 @@ class Deployment extends Model
 
     protected $casts = [
         'inventory_ids' => 'array',
-        'cli_check_flags' => 'array',
-        'cli_target_flags' => 'array',
-        'cli_forks' => 'integer',
+        'cli_flags' => 'array',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
         'exit_code' => 'integer',
+        'forks' => 'integer',
     ];
 
     public function taskTemplate(): BelongsTo
