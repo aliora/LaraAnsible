@@ -21,6 +21,10 @@ class KeystoreResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
 
+    protected static ?string $navigationLabel = 'Credentials';
+
+    protected static ?string $modelLabel = 'Credential';
+
     protected static ?int $navigationSort = 3;
 
     public static function form(Schema $schema): Schema

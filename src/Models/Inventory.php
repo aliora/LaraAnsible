@@ -17,6 +17,9 @@ class Inventory extends Model
         'variables',
         'source_type',
         'dynamic_child_id',
+        'script',
+        'park_id',
+        'is_active',
     ];
 
     protected $casts = [
@@ -32,5 +35,10 @@ class Inventory extends Model
     public function keystore(): BelongsTo
     {
         return $this->belongsTo(Keystore::class);
+    }
+
+    public function park(): BelongsTo
+    {
+        return $this->belongsTo(\App\Models\Park::class);
     }
 }

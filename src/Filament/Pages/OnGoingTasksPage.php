@@ -25,9 +25,9 @@ class OnGoingTasksPage extends Page implements HasTable
 
     protected static ?int $navigationSort = 10;
 
-    protected static ?string $navigationLabel = 'Devam Eden İşlemler';
+    protected static ?string $navigationLabel = 'Activity Log';
 
-    protected static ?string $title = 'Devam Eden İşlemler';
+    protected static ?string $title = 'Activity Log';
 
     protected static ?string $slug = 'ansible/on-going-tasks';
 
@@ -42,27 +42,23 @@ class OnGoingTasksPage extends Page implements HasTable
             ->query(
                 Deployment::query()
                     ->with(['taskTemplate', 'user'])
-                    ->whereIn('status', ['pending', 'running'])
-                    ->orWhere(function ($query) {
-                        $query->whereIn('status', ['success', 'failed'])
-                            ->where('completed_at', '>=', now()->subMinutes(30));
-                    })
+                    // Show all deployments, including history
                     ->orderByDesc('created_at')
             )
             ->poll('12s')
             ->columns([
                 Tables\Columns\TextColumn::make('taskTemplate.name')
-                    ->label('Görev')
+                    ->label('Task')
                     ->searchable()
                     ->sortable()
                     ->icon('heroicon-o-command-line'),
                 Tables\Columns\TextColumn::make('total_hosts')
-                    ->label('Cihaz')
+                    ->label('Hosts')
                     ->badge()
                     ->color('info')
-                    ->suffix(' adet'),
+                    ->suffix(' hosts'),
                 Tables\Columns\TextColumn::make('progress')
-                    ->label('İlerleme')
+                    ->label('Progress')
                     ->formatStateUsing(function ($state, Deployment $record): HtmlString {
                         $progress = $state ?? 0;
                         $processed = $record->processed_hosts ?? 0;
@@ -85,7 +81,7 @@ class OnGoingTasksPage extends Page implements HasTable
                         );
                     }),
                 Tables\Columns\BadgeColumn::make('status')
-                    ->label('Durum')
+                    ->label('Status')
                     ->colors([
                         'warning' => 'pending',
                         'info' => 'running',
@@ -99,33 +95,33 @@ class OnGoingTasksPage extends Page implements HasTable
                         'heroicon-o-x-circle' => 'failed',
                     ])
                     ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'pending' => 'Bekliyor',
-                        'running' => 'Çalışıyor',
-                        'success' => 'Başarılı',
-                        'failed' => 'Başarısız',
+                        'pending' => 'Pending',
+                        'running' => 'Running',
+                        'success' => 'Successful',
+                        'failed' => 'Failed',
                         default => $state,
                     }),
                 Tables\Columns\TextColumn::make('user.name')
-                    ->label('Başlatan')
+                    ->label('Started By')
                     ->placeholder('-'),
                 Tables\Columns\TextColumn::make('started_at')
-                    ->label('Başlangıç')
+                    ->label('Started At')
                     ->dateTime('d.m.Y H:i')
                     ->sortable(),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
-                    ->label('Durum')
+                    ->label('Status')
                     ->options([
-                        'pending' => 'Bekliyor',
-                        'running' => 'Çalışıyor',
-                        'success' => 'Başarılı',
-                        'failed' => 'Başarısız',
+                        'pending' => 'Pending',
+                        'running' => 'Running',
+                        'success' => 'Successful',
+                        'failed' => 'Failed',
                     ]),
             ])
             ->actions([
                 Actions\Action::make('watch_terminal')
-                    ->label('Terminali İzle')
+                    ->label('Watch Output')
                     ->icon('heroicon-o-computer-desktop')
                     ->color('info')
                     ->modalHeading(fn (Deployment $record): string => "Terminal: {$record->taskTemplate?->name}")
@@ -137,17 +133,17 @@ class OnGoingTasksPage extends Page implements HasTable
                     })
                     ->modalWidth('4xl')
                     ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Kapat'),
+                    ->modalCancelActionLabel('Close'),
             ])
             ->headerActions([
                 Actions\Action::make('create_new_job')
-                    ->label('Yeni İş Başlat')
+                    ->label('New Job')
                     ->icon('heroicon-o-plus-circle')
                     ->color('success')
-                    ->modalHeading('Yeni Ansible Görevi Başlat')
+                    ->modalHeading('Start New Ansible Job')
                     ->form([
                         Forms\Components\Select::make('inventory_ids')
-                            ->label('Cihazlar')
+                            ->label('Target Hosts')
                             ->options(\VisioSoft\LaraAnsible\Models\Inventory::pluck('name', 'id'))
                             ->multiple()
                             ->searchable()
@@ -162,8 +158,8 @@ class OnGoingTasksPage extends Page implements HasTable
                         );
                     }),
             ])
-            ->emptyStateHeading('Aktif görev bulunamadı')
-            ->emptyStateDescription('Yeni bir görev başlatmak için yukarıdaki "Yeni İş Başlat" butonunu kullanın.')
+            ->emptyStateHeading('No activities found')
+            ->emptyStateDescription('Use the "New Job" button to start a deployment.')
             ->emptyStateIcon('heroicon-o-play-circle');
     }
 

@@ -16,9 +16,13 @@ class TaskTemplateResource extends Resource
 {
     protected static ?string $model = TaskTemplate::class;
 
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-document-text';
+    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-list';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
+
+    protected static ?string $navigationLabel = 'Job Templates';
+
+    protected static ?string $modelLabel = 'Job Template';
 
     protected static ?int $navigationSort = 2;
 
@@ -27,49 +31,39 @@ class TaskTemplateResource extends Resource
         return $schema
             ->schema([
                 Section::make('Template Details')
+                    ->icon('heroicon-o-clipboard-document-list')
                     ->schema([
                         Forms\Components\TextInput::make('name')
+                            ->label('Template Name')
                             ->required()
                             ->maxLength(255),
-                        Forms\Components\Textarea::make('description')
-                            ->rows(3)
-                            ->columnSpanFull(),
-                        Forms\Components\Toggle::make('is_active')
-                            ->default(true),
-                    ])
-                    ->columns(2),
-                Section::make('Playbook Configuration')
-                    ->schema([
-                        Forms\Components\Select::make('playbook_path')
-                            ->label('Playbook File')
-                            ->options(function () {
-                                $directory = config('laraansible.playbook_directory', base_path('ansible'));
-                                if (! is_dir($directory)) {
-                                    return [];
-                                }
-                                $files = glob($directory.'/*.yml') ?: [];
-                                $files = array_merge($files, glob($directory.'/*.yaml') ?: []);
-                                $options = [];
-                                foreach ($files as $file) {
-                                    $basename = basename($file);
-                                    $options[$file] = $basename;
-                                }
-
-                                return $options;
-                            })
-                            ->searchable()
-                            ->helperText('Select a playbook file from the configured directory'),
                         Forms\Components\Textarea::make('playbook_content')
-                            ->label('Playbook Content (Optional)')
-                            ->rows(10)
-                            ->columnSpanFull()
-                            ->helperText('Optionally paste playbook content here. If both file and content are provided, content takes precedence.'),
-                        Forms\Components\KeyValue::make('extra_vars')
-                            ->label('Extra Variables')
-                            ->keyLabel('Variable Name')
-                            ->valueLabel('Value')
-                            ->columnSpanFull()
-                            ->helperText('Add extra variables to pass to ansible-playbook with --extra-vars'),
+                            ->label('Playbook YAML')
+                            ->rows(12)
+                            ->required()
+                            ->extraInputAttributes(['style' => 'font-family: monospace;']),
+                    ]),
+                Section::make('Associated Files')
+                    ->icon('heroicon-o-document-duplicate')
+                    ->description('Ansible template files (Jinja2)')
+                    ->extraAttributes(['style' => 'max-height: 500px; overflow-y: auto;'])
+                    ->schema([
+                        Forms\Components\Repeater::make('templates')
+                            ->hiddenLabel()
+                            ->schema([
+                                Forms\Components\TextInput::make('name')
+                                    ->label('Filename')
+                                    ->required()
+                                    ->placeholder('nginx.conf.j2'),
+                                Forms\Components\Textarea::make('content')
+                                    ->label('Content')
+                                    ->required()
+                                    ->rows(3)
+                                    ->extraInputAttributes(['style' => 'font-family: monospace;']),
+                            ])
+                            ->collapsible()
+                            ->itemLabel(fn (array $state): ?string => $state['name'] ?? null)
+                            ->addActionLabel('Add File'),
                     ]),
             ]);
     }

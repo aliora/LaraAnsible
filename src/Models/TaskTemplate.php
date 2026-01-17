@@ -15,11 +15,13 @@ class TaskTemplate extends Model
         'extra_vars',
         'type',
         'is_active',
+        'templates',
     ];
 
     protected $casts = [
         'extra_vars' => 'array',
         'is_active' => 'boolean',
+        'templates' => 'array',
     ];
 
     public function deployments(): HasMany
