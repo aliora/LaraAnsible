@@ -2,6 +2,8 @@
 
 namespace VisioSoft\LaraAnsible;
 
+use Filament\Support\Assets\Css;
+use Filament\Support\Facades\FilamentAsset;
 use Illuminate\Support\ServiceProvider;
 
 class LaraAnsibleServiceProvider extends ServiceProvider
@@ -24,6 +26,10 @@ class LaraAnsibleServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'laraansible');
+
+        FilamentAsset::register([
+            Css::make('laraansible-styles', __DIR__ . '/../resources/css/laraansible.css'),
+        ], 'visio/laraansible');
 
         $this->publishes([
             __DIR__.'/../config/laraansible.php' => config_path('laraansible.php'),

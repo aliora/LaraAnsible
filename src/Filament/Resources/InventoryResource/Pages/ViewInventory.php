@@ -15,4 +15,12 @@ class ViewInventory extends ViewRecord
     {
         return Width::Full;
     }
+
+    protected function mutateFormDataBeforeFill(array $data): array
+    {
+        $hostsEntry = $this->getRecord()->hosts_entry;
+        $data['hosts_entry'] = is_array($hostsEntry) ? $hostsEntry : [];
+
+        return $data;
+    }
 }

@@ -9,6 +9,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource\Pages;
 use VisioSoft\LaraAnsible\Models\TaskTemplate;
 
@@ -48,6 +49,50 @@ class TaskTemplateResource extends Resource
                     ->description('Ansible template files (Jinja2)')
                     ->extraAttributes(['style' => 'max-height: 500px; overflow-y: auto;'])
                     ->schema([
+                        Forms\Components\FileUpload::make('template_upload')
+                            ->label('Upload Template File')
+                            ->helperText('Upload a Jinja2 template file to populate the fields below.')
+                            ->multiple()
+                            ->maxFiles(25)
+                            ->appendFiles()
+                            ->storeFiles(false)
+                            ->dehydrated(false)
+                            ->afterStateUpdated(function ($state, $set, $get): void {
+                                if (! $state) {
+                                    return;
+                                }
+
+                                $files = is_array($state) ? $state : [$state];
+                                $templates = $get('templates') ?? [];
+
+                                foreach ($files as $file) {
+                                    if (! $file instanceof TemporaryUploadedFile) {
+                                        continue;
+                                    }
+
+                                    $name = $file->getClientOriginalName();
+                                    $content = $file->get();
+                                    $updated = false;
+
+                                    foreach ($templates as $index => $template) {
+                                        if (($template['name'] ?? null) === $name) {
+                                            $templates[$index]['content'] = $content;
+                                            $updated = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (! $updated) {
+                                        $templates[] = [
+                                            'name' => $name,
+                                            'content' => $content,
+                                        ];
+                                    }
+                                }
+
+                                $set('templates', array_values($templates));
+                                $set('template_upload', null);
+                            }),
                         Forms\Components\Repeater::make('templates')
                             ->hiddenLabel()
                             ->schema([
@@ -75,6 +120,14 @@ class TaskTemplateResource extends Resource
                 Tables\Columns\TextColumn::make('name')
                     ->searchable()
                     ->sortable(),
+                Tables\Columns\TextColumn::make('playbook_content')
+                    ->label('Playbook')
+                    ->wrap()
+                    ->limit(120)
+                    ->tooltip(fn (?string $state): ?string => filled($state) ? $state : null),
+                Tables\Columns\TextColumn::make('templates_count')
+                    ->label('Templates')
+                    ->state(fn (TaskTemplate $record): int => count($record->templates ?? [])),
                 Tables\Columns\IconColumn::make('is_active')
                     ->boolean()
                     ->sortable(),

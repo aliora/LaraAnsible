@@ -22,6 +22,7 @@ class AnsibleSetting extends Model
         'version_column',
         'ssh_port',
         'ssh_username',
+        'ssh_private_key_path',
         'is_active',
     ];
 

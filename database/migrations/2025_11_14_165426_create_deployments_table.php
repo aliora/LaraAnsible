@@ -16,7 +16,7 @@ return new class extends Migration
             $table->foreignId('task_template_id')->constrained()->cascadeOnDelete();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->json('inventory_ids')->nullable(); // Array of selected inventory IDs
-            $table->string('status')->default('pending'); // pending, running, success, failed
+            $table->string('status')->default('pending'); // pending, running, success, failed, warning
             $table->text('command_input')->nullable();
             $table->text('command_output')->nullable();
             $table->timestamp('started_at')->nullable();

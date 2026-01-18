@@ -3,9 +3,9 @@
 namespace VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
 
 use Filament\Resources\Pages\CreateRecord;
-use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
-
 use Filament\Support\Enums\Width;
+use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
+use VisioSoft\LaraAnsible\Models\Inventory;
 
 class CreateInventory extends CreateRecord
 {
@@ -14,5 +14,15 @@ class CreateInventory extends CreateRecord
     public function getMaxContentWidth(): Width
     {
         return Width::Full;
+    }
+
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        $script = Inventory::buildInventoryScriptFromData($data);
+        if ($script !== null) {
+            $data['script'] = $script;
+        }
+
+        return $data;
     }
 }

@@ -1,0 +1,30 @@
+.laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-option {
+    align-items: center;
+    width: 100%;
+}
+
+.laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-option .fi-checkbox-input {
+    margin-top: 0;
+}
+
+.laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-option-text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-option-label {
+    display: block;
+    width: 100%;
+}
+
+.laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-options {
+    gap: 0.5rem;
+}
+
+.laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-options.fi-grid-direction-col {
+    margin-top: -0.5rem;
+}
+
+.laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-options.fi-grid-direction-col .fi-fo-checkbox-list-option-ctn {
+    padding-top: 0.5rem;
+}

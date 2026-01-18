@@ -3,6 +3,7 @@
 namespace VisioSoft\LaraAnsible\Filament\Pages;
 
 use Filament\Actions;
+use Filament\Forms;
 use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
@@ -13,7 +14,6 @@ use Illuminate\Support\HtmlString;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Services\DeploymentService;
-use Filament\Forms;
 
 class OnGoingTasksPage extends Page implements HasTable
 {
@@ -45,24 +45,67 @@ class OnGoingTasksPage extends Page implements HasTable
                     // Show all deployments, including history
                     ->orderByDesc('created_at')
             )
-            ->poll('12s')
+            ->poll('3s')
             ->columns([
                 Tables\Columns\TextColumn::make('taskTemplate.name')
                     ->label('Task')
                     ->searchable()
                     ->sortable()
                     ->icon('heroicon-o-command-line'),
+                Tables\Columns\TextColumn::make('inventories')
+                    ->label('Inventories')
+                    ->formatStateUsing(function (Deployment $record): string {
+                        $inventoryIds = $record->inventory_ids ?? [];
+                        if (empty($inventoryIds)) {
+                            return '-';
+                        }
+                        $inventories = \VisioSoft\LaraAnsible\Models\Inventory::whereIn('id', $inventoryIds)->pluck('name');
+
+                        return $inventories->join(', ');
+                    })
+                    ->wrap()
+                    ->tooltip(function (Deployment $record): ?string {
+                        $inventoryIds = $record->inventory_ids ?? [];
+                        if (empty($inventoryIds)) {
+                            return null;
+                        }
+                        $inventories = \VisioSoft\LaraAnsible\Models\Inventory::whereIn('id', $inventoryIds)->pluck('name');
+
+                        return $inventories->join(', ');
+                    }),
                 Tables\Columns\TextColumn::make('total_hosts')
                     ->label('Hosts')
+                    ->state(function (Deployment $record): int {
+                        $inventoryIds = $record->inventory_ids ?? [];
+                        if (empty($inventoryIds)) {
+                            return 0;
+                        }
+                        $inventories = \VisioSoft\LaraAnsible\Models\Inventory::whereIn('id', $inventoryIds)->get();
+                        $totalHosts = 0;
+                        foreach ($inventories as $inventory) {
+                            if (! empty($inventory->script)) {
+                                preg_match_all('/^([a-zA-Z0-9_.-]+)\s+ansible_host=/m', $inventory->script, $matches);
+                                $totalHosts += count($matches[1] ?? []);
+                            } elseif (! empty($inventory->hosts_entry)) {
+                                $totalHosts += count($inventory->hosts_entry);
+                            }
+                        }
+
+                        return $totalHosts;
+                    })
                     ->badge()
                     ->color('info')
                     ->suffix(' hosts'),
                 Tables\Columns\TextColumn::make('progress')
                     ->label('Progress')
                     ->formatStateUsing(function ($state, Deployment $record): HtmlString {
-                        $progress = $state ?? 0;
                         $processed = $record->processed_hosts ?? 0;
                         $total = $record->total_hosts ?? 0;
+                        $progress = 0.0;
+                        if ($total > 0) {
+                            $progress = ($processed / $total) * 100;
+                        }
+                        $progress = round(max(0, min(100, $progress)), 1);
 
                         $colorClass = match (true) {
                             $progress >= 100 => 'bg-green-500',
@@ -83,19 +126,22 @@ class OnGoingTasksPage extends Page implements HasTable
                 Tables\Columns\BadgeColumn::make('status')
                     ->label('Status')
                     ->colors([
-                        'warning' => 'pending',
+                        'gray' => 'pending',
+                        'warning' => 'warning',
                         'info' => 'running',
                         'success' => 'success',
                         'danger' => 'failed',
                     ])
                     ->icons([
                         'heroicon-o-clock' => 'pending',
+                        'heroicon-o-exclamation-triangle' => 'warning',
                         'heroicon-o-arrow-path' => 'running',
                         'heroicon-o-check-circle' => 'success',
                         'heroicon-o-x-circle' => 'failed',
                     ])
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'pending' => 'Pending',
+                        'warning' => 'Warning',
                         'running' => 'Running',
                         'success' => 'Successful',
                         'failed' => 'Failed',
@@ -114,6 +160,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->label('Status')
                     ->options([
                         'pending' => 'Pending',
+                        'warning' => 'Warning',
                         'running' => 'Running',
                         'success' => 'Successful',
                         'failed' => 'Failed',
@@ -124,6 +171,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->label('Watch Output')
                     ->icon('heroicon-o-computer-desktop')
                     ->color('info')
+                    ->button()
                     ->modalHeading(fn (Deployment $record): string => "Terminal: {$record->taskTemplate?->name}")
                     ->modalContent(function (Deployment $record): HtmlString {
                         return new HtmlString(Blade::render(
@@ -134,6 +182,22 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->modalWidth('4xl')
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close'),
+                Actions\Action::make('repeat_job')
+                    ->label('Repeat')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->button()
+                    ->requiresConfirmation()
+                    ->modalHeading('Repeat Job')
+                    ->modalDescription(fn (Deployment $record): string => "Do you want to repeat the job '{$record->taskTemplate?->name}' with the same configuration?")
+                    ->modalSubmitActionLabel('Yes, Repeat')
+                    ->action(function (Deployment $record): void {
+                        app(DeploymentService::class)->createWithInventoryIds(
+                            $record->inventory_ids ?? [],
+                            $record->task_template_id
+                        );
+                    })
+                    ->successNotificationTitle('Job repeated successfully'),
             ])
             ->headerActions([
                 Actions\Action::make('create_new_job')

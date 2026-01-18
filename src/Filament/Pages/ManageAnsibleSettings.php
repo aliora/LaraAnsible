@@ -75,6 +75,11 @@ class ManageAnsibleSettings extends Page implements HasForms
                                         ->label('SSH User')
                                         ->prefixIcon('heroicon-o-user')
                                         ->disabled(),
+                                    Forms\Components\TextInput::make('ssh_private_key_path')
+                                        ->label('SSH Key Path')
+                                        ->prefixIcon('heroicon-o-key')
+                                        ->placeholder('~/.ssh/id_ed25519')
+                                        ->disabled(),
                                     Forms\Components\TextInput::make('child_hostname_column')
                                         ->label('IP/Hostname Column')
                                         ->prefixIcon('heroicon-o-globe-alt')
@@ -86,13 +91,16 @@ class ManageAnsibleSettings extends Page implements HasForms
                                         ->disabled(),
                                 ]),
 
-                            Grid::make(3)
+                            Grid::make(4)
                                 ->schema([
                                     Forms\Components\TextInput::make('ssh_port')
                                         ->label('SSH Port')
                                         ->numeric(),
                                     Forms\Components\TextInput::make('ssh_username')
                                         ->label('SSH Username'),
+                                    Forms\Components\TextInput::make('ssh_private_key_path')
+                                        ->label('SSH Key Path')
+                                        ->placeholder('~/.ssh/id_ed25519'),
                                     
                                      Actions::make([
                                         SchemaAction::make('save_changes')
@@ -103,6 +111,7 @@ class ManageAnsibleSettings extends Page implements HasForms
                                                 $setting->update([
                                                     'ssh_port' => $get('ssh_port'),
                                                     'ssh_username' => $get('ssh_username'),
+                                                    'ssh_private_key_path' => $get('ssh_private_key_path'),
                                                 ]);
                                                 Notification::make()
                                                     ->title('SSH Settings Updated')
@@ -242,8 +251,13 @@ class ManageAnsibleSettings extends Page implements HasForms
                                         ->default('root')
                                         ->placeholder('root')
                                         ->helperText('Default SSH username for all devices'),
+                                    Forms\Components\TextInput::make('ssh_private_key_path')
+                                        ->label('SSH Key Path')
+                                        ->default('~/.ssh/id_ed25519')
+                                        ->placeholder('~/.ssh/id_ed25519')
+                                        ->helperText('Default private key path for inventory scripts'),
                                 ])
-                                ->columns(3),
+                                ->columns(4),
                         ]),
                 ])
                     ->submitAction(null),

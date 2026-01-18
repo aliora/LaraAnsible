@@ -29,11 +29,20 @@ class LatestDeployments extends BaseWidget
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
                     ->colors([
-                        'warning' => 'pending',
+                        'gray' => 'pending',
+                        'warning' => 'warning',
                         'info' => 'running',
                         'success' => 'success',
                         'danger' => 'failed',
-                    ]),
+                    ])
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        'pending' => 'Pending',
+                        'warning' => 'Warning',
+                        'running' => 'Running',
+                        'success' => 'Successful',
+                        'failed' => 'Failed',
+                        default => $state,
+                    }),
                 Tables\Columns\TextColumn::make('started_at')
                     ->dateTime()
                     ->label('Started'),

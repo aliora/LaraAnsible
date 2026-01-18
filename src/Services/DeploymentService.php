@@ -23,6 +23,12 @@ class DeploymentService
         ?int $userId = null,
         bool $notify = true
     ): Deployment {
+        // Debug: Log input parameters
+        \Log::info("DeploymentService::createWithInventoryIds called");
+        \Log::info("Inventory IDs: ".json_encode($inventoryIds));
+        \Log::info("Task Template ID: {$taskTemplateId}");
+        \Log::info("User ID: ".($userId ?? auth()->id() ?? 'null'));
+
         $deployment = Deployment::create([
             'task_template_id' => $taskTemplateId,
             'user_id' => $userId ?? auth()->id(),
@@ -30,6 +36,9 @@ class DeploymentService
             'status' => 'pending',
             'total_hosts' => count($inventoryIds),
         ]);
+
+        // Debug: Log created deployment
+        \Log::info("Created deployment: id={$deployment->id}, inventory_ids=".json_encode($deployment->inventory_ids));
 
         ExecuteAnsibleDeployment::dispatch($deployment);
 

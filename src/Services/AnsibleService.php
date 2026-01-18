@@ -25,8 +25,10 @@ class AnsibleService
             Log::info("Starting deployment {$deployment->id}");
 
             // Create temporary files
-            $inventoryPath = $this->createInventoryFile($deployment);
-            Log::info("Created inventory file: {$inventoryPath}");
+            $inventoryData = $this->createInventoryFile($deployment);
+            $inventoryPath = $inventoryData['path'];
+            $totalHostsCount = $inventoryData['host_count'];
+            Log::info("Created inventory file: {$inventoryPath} with {$totalHostsCount} hosts");
 
             $playbookPath = $this->createPlaybookFile($deployment);
             Log::info("Created playbook file: {$playbookPath}");
@@ -40,8 +42,9 @@ class AnsibleService
             Log::info("Command to execute: {$commandData['display_command']}");
 
             // Get total tasks count
-            $totalTasks = $this->getTotalTasks($deployment, $inventoryPath, $playbookPath);
-            Log::info("Total tasks to execute: {$totalTasks}");
+            $totalPlaybookTasks = $this->getTotalTasks($deployment, $inventoryPath, $playbookPath);
+            $totalTasks = max(1, $totalPlaybookTasks);
+            Log::info("Total playbook tasks: {$totalTasks}");
 
             // Store command input before execution
             $commandInput = "=== Command ===\n";
@@ -53,70 +56,64 @@ class AnsibleService
 
             $deployment->update([
                 'command_input' => $commandInput,
-                'total_hosts' => $totalTasks, // Storing total tasks in total_hosts temporary or use a new column?
-                // The user request implies we want progress based on tasks.
-                // The DB column `total_hosts` is currently used for total hosts.
-                // If I repurpose it, the UI label "Hosts" will be wrong.
-                // However, the `Deployment` model has `total_hosts` and `processed_hosts`.
-                // If I want to show task progress, I should probably calculate percentage myself and store in `progress`.
-                // Let's keep `total_hosts` as actual host count if possible, effectively calculated from inventory.
-                // But the user specifically asked for progress based on tasks.
-                // Let's rely on `progress` column for the percentage.
-                // Usage of `processed_hosts` vs `total_hosts` in UI:
-                // UI shows: $processed.'/'.$total.
-                // If I put task counts there, it will task X/Y.
-                // The code below keeps `processed_hosts` as host count but updates `progress` based on tasks.
-                // Or I can just track tasks in a local variable and update `progress`.
+                // Use total_hosts/processed_hosts to track task progress (X/Y) in the UI.
+                'total_hosts' => $totalTasks,
+                'processed_hosts' => 0,
             ]);
 
             // Execute the command with streaming output
             $outputBuffer = '';
-            $processedHosts = 0;
             $completedTasks = 0;
-            $totalHosts = $deployment->total_hosts ?: 1;
+            $totalTasks = max(1, $totalTasks);
 
             // Use an unlimited timeout to allow long-running Ansible playbooks
-            $result = Process::forever()->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, &$processedHosts, &$completedTasks, $totalHosts, $totalTasks, $deployment) {
+            $result = Process::forever()
+                ->env([
+                    'PYTHONUNBUFFERED' => '1',
+                    'ANSIBLE_STDOUT_CALLBACK' => 'default',
+                ])
+                ->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, &$completedTasks, $totalTasks, $deployment) {
                 $outputBuffer .= $output;
 
                 // Parse Ansible output to track progress
 
-                // Track completed tasks
-                if (preg_match_all('/TASK \[.*\]/i', $output, $matches)) {
-                    $completedTasks += count($matches[0]);
+                // Count tasks in the accumulated output buffer.
+                // TASK lines are emitted once per task (not per host).
+                $cleanOutput = preg_replace('/\x1b\[[0-9;]*m/', '', $outputBuffer);
+                $completedTasks = 0;
+                if (preg_match_all('/^\s*TASK \[.*\]/m', $cleanOutput, $matches)) {
+                    $completedTasks = count($matches[0]);
                 }
 
-                // Track processed hosts (for "processed_hosts" counter, separate from progress %)
-                // Look for patterns like "ok: [hostname]" or "changed: [hostname]" or "PLAY RECAP"
-                if (preg_match_all('/(?:ok|changed|failed|unreachable):\s*\[([^\]]+)\]/', $output, $matches)) {
-                    $processedHosts += count(array_unique($matches[1]));
-                }
+                $processedTasks = min($completedTasks, $totalTasks);
 
                 // Calculate progress percentage based on TASKS
                 $progress = 0;
                 if ($totalTasks > 0) {
-                    $progress = min(100, (int) (($completedTasks / $totalTasks) * 100));
+                    $progress = min(100, (int) round(($processedTasks / $totalTasks) * 100));
                 }
 
                 // If we see PLAY RECAP, we're likely done or close to it.
-                if (str_contains($output, 'PLAY RECAP')) {
+                if (str_contains($cleanOutput, 'PLAY RECAP')) {
                     $progress = 100;
+                    $processedTasks = $totalTasks;
                 }
 
                 // Update deployment with partial output and progress for real-time viewing
                 $deployment->update([
                     'command_output' => $outputBuffer,
                     'progress' => $progress,
-                    'processed_hosts' => min($processedHosts, $totalHosts), // Keep tracking hosts for the label X/Y hosts if needed, even if progress bar is task based.
+                    'processed_hosts' => $processedTasks,
                 ]);
             });
 
             Log::info("Command executed with exit code: {$result->exitCode()}");
 
             // Final update with complete output and status
+            $finalOutput = $result->output();
             $deployment->update([
-                'status' => $result->successful() ? 'success' : 'failed',
-                'command_output' => $result->output(),
+                'status' => $this->resolveDeploymentStatus($finalOutput, $result->exitCode()),
+                'command_output' => $finalOutput,
                 'exit_code' => $result->exitCode(),
                 'completed_at' => now(),
                 'progress' => 100, // Ensure it's 100 on completion
@@ -151,12 +148,26 @@ class AnsibleService
 
     /**
      * Create temporary inventory file or use existing inventory file
+     * Returns array with 'path' and 'host_count'
      */
-    protected function createInventoryFile(Deployment $deployment): string
+    protected function createInventoryFile(Deployment $deployment): array
     {
+        // Debug: Log deployment info
+        Log::info("Creating inventory for deployment {$deployment->id}");
+        Log::info('Deployment inventory_ids: '.json_encode($deployment->inventory_ids));
+        Log::info('Deployment inventory_file: '.($deployment->inventory_file ?? 'null'));
+
         // If an inventory file is specified, use it directly
+        // If an inventory file is specified, use it directly (assume 1 host or we count later? Difficult without parsing)
+        // For custom inventory files, we might just have to scan it or default to 1 count logic if not parsed.
+        // Let's try to count lines with "ansible_host" as a heuristic for custom files too.
         if ($deployment->inventory_file && file_exists($deployment->inventory_file)) {
-            return $deployment->inventory_file;
+             $content = file_get_contents($deployment->inventory_file);
+             $count = substr_count($content, 'ansible_host='); // Basic heuristic
+             return [
+                 'path' => $deployment->inventory_file,
+                 'host_count' => max(1, $count)
+             ];
         }
 
         $inventoryIds = $deployment->inventory_ids ?? [];
@@ -191,6 +202,14 @@ class AnsibleService
             } else {
                 $inventories = Inventory::whereIn('id', $staticInventoryIds)->get();
             }
+        }
+
+        // Debug: Log inventory query results
+        Log::info('Static Inventory IDs: '.json_encode($staticInventoryIds));
+        Log::info('Dynamic Inventory IDs: '.json_encode($dynamicInventoryIds));
+        Log::info('Inventories found: '.$inventories->count());
+        foreach ($inventories as $inv) {
+            Log::info("Inventory: id={$inv->id}, name={$inv->name}, hostname={$inv->hostname}, is_active={$inv->is_active}");
         }
 
         // 2. Handle Dynamic Inventories
@@ -231,6 +250,11 @@ class AnsibleService
 
         $content = '';
         $setting = AnsibleSetting::getInstance();
+
+        Log::info('CODE VERSION: 2025-01-18-18:00 - BEFORE GROUPING');
+
+        // Track all hostnames for the [all] group
+        $allHosts = [];
 
         // Group inventories by parent
         $groupedInventories = [];
@@ -273,8 +297,11 @@ class AnsibleService
         }
 
         // Build inventory content with groups
+        Log::info('Building grouped inventories. Count: '.count($groupedInventories));
         foreach ($groupedInventories as $groupName => $groupInventories) {
+            Log::info("Processing group: {$groupName}, inventories count: ".count($groupInventories));
             $content .= "[{$groupName}]\n";
+            Log::info('Content after group header: '.json_encode($content));
 
             $groupVars = [];
             $groupKeystores = [];
@@ -282,12 +309,17 @@ class AnsibleService
             $groupPorts = [];
 
             foreach ($groupInventories as $inventory) {
-                if (empty($inventory->hostname)) {
-                    continue;
+                Log::info("Processing inventory in group: id={$inventory->id}, hostname={$inventory->hostname}");
+                $hostsEntry = Inventory::normalizeHostsEntry($inventory->hosts_entry ?? []);
+                if (empty($hostsEntry) && ! empty($inventory->hostname)) {
+                    $hostsEntry = [$inventory->name ?? $inventory->hostname => $inventory->hostname];
                 }
 
-                $hostLine = $inventory->name ?? $inventory->hostname;
-                $hostLine .= " ansible_host={$inventory->hostname}";
+                if (empty($hostsEntry)) {
+                    Log::info('Skipping inventory with empty hostname');
+
+                    continue;
+                }
 
                 // Collect all unique values for group vars
                 if ($inventory->username) {
@@ -300,8 +332,25 @@ class AnsibleService
                     $groupKeystores[$inventory->keystore->id] = $inventory->keystore;
                 }
 
-                $content .= $hostLine."\n";
+                foreach ($hostsEntry as $hostName => $hostValue) {
+                    $alias = trim((string) $hostName);
+                    $hostIp = trim((string) $hostValue);
+
+                    if ($alias === '' || $hostIp === '') {
+                        continue;
+                    }
+
+                    $hostLine = "{$alias} ansible_host={$hostIp}";
+
+                    // Track for [all] group
+                    $allHosts[] = $hostLine;
+
+                    $content .= $hostLine."\n";
+                    Log::info('Content after adding host: '.json_encode(substr($content, -200)));
+                }
             }
+
+            Log::info("Finished processing group {$groupName}, content length: ".strlen($content));
 
             // Add group vars section
             $hasGroupVars = false;
@@ -336,17 +385,32 @@ class AnsibleService
         }
 
         // Add ungrouped inventories
+        Log::info('Building ungrouped inventories. Count: '.count($ungroupedInventories));
         if (! empty($ungroupedInventories)) {
             $content .= "[ungrouped]\n";
 
             foreach ($ungroupedInventories as $inventory) {
-                if (! empty($inventory->script)) {
+                Log::info("Processing ungrouped inventory: id={$inventory->id}, hostname={$inventory->hostname}, script=".(! empty($inventory->script) ? 'YES' : 'NO'));
+                if (! empty($inventory->script) && $inventory->source_type !== 'dynamic') {
+                    Log::info('Skipping script-based inventory');
+
                     continue; // Skip script-based inventories for now
                 }
 
-                if (! empty($inventory->hostname)) {
-                    $line = $inventory->name ?? $inventory->hostname;
-                    $line .= " ansible_host={$inventory->hostname}";
+                $hostsEntry = Inventory::normalizeHostsEntry($inventory->hosts_entry ?? []);
+                if (empty($hostsEntry) && ! empty($inventory->hostname)) {
+                    $hostsEntry = [$inventory->name ?? $inventory->hostname => $inventory->hostname];
+                }
+
+                foreach ($hostsEntry as $hostName => $hostValue) {
+                    $alias = trim((string) $hostName);
+                    $hostIp = trim((string) $hostValue);
+
+                    if ($alias === '' || $hostIp === '') {
+                        continue;
+                    }
+
+                    $line = "{$alias} ansible_host={$hostIp}";
 
                     if ($inventory->port) {
                         $line .= " ansible_port={$inventory->port}";
@@ -360,7 +424,11 @@ class AnsibleService
                         $line .= " ansible_ssh_private_key_file={$keyPath}";
                     }
 
+                    // Track for [all] group
+                    $allHosts[] = $line;
+
                     $content .= $line."\n";
+                    Log::info('Added ungrouped host, content length now: '.strlen($content));
                 }
             }
 
@@ -369,9 +437,35 @@ class AnsibleService
 
         // Append script-based inventories at the end
         foreach ($inventories as $inventory) {
-            if (! empty($inventory->script)) {
+            if (! empty($inventory->script) && $inventory->source_type !== 'dynamic') {
                 $content .= $inventory->script."\n";
+
+                foreach ($this->extractHostLinesFromInventoryScript($inventory->script) as $hostLine) {
+                    $allHosts[] = $hostLine;
+                }
             }
+        }
+
+        // Prepend [gate_server] and [all] groups at the beginning if we have hosts
+        if (! empty($allHosts)) {
+            // Remove duplicates
+            $allHosts = array_unique($allHosts);
+
+            // Create [gate_server] group with all hosts directly
+            $gateServerContent = "[gate_server]\n";
+            foreach ($allHosts as $hostLine) {
+                $gateServerContent .= $hostLine."\n";
+            }
+            $gateServerContent .= "\n";
+
+            // Also create [all] group for compatibility
+            $allGroupContent = "[all]\n";
+            foreach ($allHosts as $hostLine) {
+                $allGroupContent .= $hostLine."\n";
+            }
+            $allGroupContent .= "\n";
+
+            $content = $gateServerContent.$allGroupContent.$content;
         }
 
         $path = storage_path('app/ansible/inventory_'.$deployment->id.'.ini');
@@ -381,7 +475,109 @@ class AnsibleService
         }
         file_put_contents($path, $content);
 
-        return $path;
+        // Debug: Log inventory content
+        Log::info("Inventory file created at: {$path}");
+        Log::info("Inventory content:\n{$content}");
+        Log::info('Total hosts collected: '.count($allHosts));
+
+        return [
+            'path' => $path,
+            'host_count' => count($allHosts)
+        ];
+    }
+
+    /**
+     * Extract host entries from an inventory script.
+     *
+     * @return array<int, string>
+     */
+    protected function extractHostsFromInventoryScript(string $script): array
+    {
+        $hosts = [];
+        $currentSection = 'hosts';
+        $lines = preg_split("/\r\n|\n|\r/", $script) ?: [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) {
+                continue;
+            }
+
+            if (preg_match('/^\[(.*?)\]$/', $line, $matches)) {
+                $header = strtolower($matches[1]);
+                if (str_contains($header, ':vars')) {
+                    $currentSection = 'vars';
+                } elseif (str_contains($header, ':children')) {
+                    $currentSection = 'children';
+                } else {
+                    $currentSection = 'hosts';
+                }
+
+                continue;
+            }
+
+            if ($currentSection !== 'hosts') {
+                continue;
+            }
+
+            $parts = preg_split('/\s+/', $line);
+            $first = $parts[0] ?? '';
+
+            if ($first === '' || str_contains($first, '=')) {
+                continue;
+            }
+
+            $hosts[] = $first;
+        }
+
+        return $hosts;
+    }
+
+    protected function extractHostLinesFromInventoryScript(string $script): array
+    {
+        $hostLines = [];
+        $currentSection = 'hosts';
+        $lines = preg_split("/\r\n|\n|\r/", $script) ?: [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) {
+                continue;
+            }
+
+            if (preg_match('/^\[(.*?)\]$/', $line, $matches)) {
+                $header = strtolower($matches[1]);
+                if (str_contains($header, ':vars')) {
+                    $currentSection = 'vars';
+                } elseif (str_contains($header, ':children')) {
+                    $currentSection = 'children';
+                } else {
+                    $currentSection = 'hosts';
+                }
+
+                continue;
+            }
+
+            if ($currentSection !== 'hosts') {
+                continue;
+            }
+
+            $parts = preg_split('/\s+/', $line);
+            $first = $parts[0] ?? '';
+
+            if ($first === '' || str_contains($first, '=')) {
+                continue;
+            }
+
+            // Return the full line if it contains ansible_host
+            if (str_contains($line, 'ansible_host=')) {
+                $hostLines[] = $line;
+            } else {
+                $hostLines[] = $first;
+            }
+        }
+
+        return $hostLines;
     }
 
     /**
@@ -665,6 +861,116 @@ class AnsibleService
         }
 
         return 1; // Fallback
+    }
+
+    /**
+     * Determine deployment status based on play recap output.
+     */
+    protected function resolveDeploymentStatus(string $output, int $exitCode): string
+    {
+        $recap = $this->parsePlayRecap($output);
+
+        if ($recap !== null) {
+            $hostsWithFailure = $recap['hosts_with_failure'];
+            $hostsWithSuccess = $recap['hosts_with_success'];
+
+            if ($hostsWithFailure > 0 && $hostsWithSuccess > 0) {
+                return 'warning';
+            }
+
+            if ($hostsWithFailure > 0) {
+                return 'failed';
+            }
+
+            if ($hostsWithSuccess > 0) {
+                return 'success';
+            }
+        }
+
+        return $exitCode === 0 ? 'success' : 'failed';
+    }
+
+    /**
+     * Parse Ansible PLAY RECAP lines and return summary counts.
+     */
+    protected function parsePlayRecap(string $output): ?array
+    {
+        // Strip ANSI color codes
+        $output = preg_replace('/\x1b[^m]*m/', '', $output);
+
+        if (! str_contains($output, 'PLAY RECAP')) {
+            return null;
+        }
+
+        $lines = preg_split("/\r?\n/", $output);
+        $inRecap = false;
+        $hostsWithSuccess = 0;
+        $hostsWithFailure = 0;
+        $totalHosts = 0;
+
+        foreach ($lines as $line) {
+            if (str_contains($line, 'PLAY RECAP')) {
+                $inRecap = true;
+                continue;
+            }
+
+            if (! $inRecap) {
+                continue;
+            }
+
+            $trim = trim($line);
+            if ($trim === '') {
+                if ($totalHosts > 0) {
+                    break;
+                }
+                continue;
+            }
+
+            // Regex to match host recap line
+            // format: hostname : ok=X changed=X unreachable=X failed=X skipped=X rescued=X ignored=X
+            if (preg_match('/^(\S+)\s*:\s*ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)/', $trim, $matches)) {
+                $totalHosts++;
+                $ok = (int) $matches[2];
+                $changed = (int) $matches[3];
+                $unreachable = (int) $matches[4];
+                $failed = (int) $matches[5];
+
+                $hasFailure = ($failed + $unreachable) > 0;
+                $hasSuccess = ($ok + $changed) > 0;
+
+                if ($hasFailure) {
+                    $hostsWithFailure++;
+                }
+                
+                // If a host has both failure and success (e.g. some tasks OK then failed), it counts as failure for the host status usually.
+                // But for the global status, we checking if *any* host succeeded.
+                
+                if ($hasSuccess && ! $hasFailure) {
+                     $hostsWithSuccess++;
+                } elseif ($hasSuccess && $hasFailure) {
+                    // Logic check: if a host partially succeeded but eventually failed, does it count towards "hostsWithSuccess"?
+                    // The goal of "warning" is: "Some hosts failed, but AT LEAST ONE host was fully successful"?
+                    // Or "Some hosts failed, but some operation succeeded"?
+                    
+                    // Usually "Warning" means: Mix of successful hosts and failed hosts.
+                    // If Host A fails, Host B succeeds -> Warning.
+                    // If Host A partially succeeds then fails -> Failed (for that host).
+                    
+                    // So we only count hostsWithSuccess if they strictly didn't fail?
+                    // Let's stick to strict success for "hostsWithSuccess".
+                }
+            }
+        }
+
+        if ($totalHosts === 0) {
+            return null;
+        }
+
+        return [
+            'total_hosts' => $totalHosts,
+            'hosts_with_success' => $hostsWithSuccess,
+            'hosts_with_failure' => $hostsWithFailure,
+        ];
     }
 
     /**
