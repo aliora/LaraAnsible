@@ -61,7 +61,18 @@ class InventoryService
         }
 
         try {
+            // Validate table exists
+            if (!$this->validateTableExists($setting->parent_table)) {
+                return [];
+            }
+
             $labelColumn = $setting->parent_label_column ?? 'name';
+            
+            // Validate column exists
+            if (!$this->validateColumnExists($setting->parent_table, $labelColumn)) {
+                return [];
+            }
+
             return DB::table($setting->parent_table)
                 ->pluck($labelColumn, 'id')
                 ->toArray();
@@ -84,11 +95,41 @@ class InventoryService
         $foreignKey = $setting->child_parent_foreign_key ?? 'parent_id';
 
         try {
+            // Validate table and column exist
+            if (!$this->validateTableExists($setting->child_table) || 
+                !$this->validateColumnExists($setting->child_table, $foreignKey)) {
+                return 0;
+            }
+
             return DB::table($setting->child_table)
                 ->where($foreignKey, $parentId)
                 ->count();
         } catch (\Exception $e) {
             return 0;
+        }
+    }
+
+    /**
+     * Validate that a table exists in the database
+     */
+    protected function validateTableExists(string $tableName): bool
+    {
+        try {
+            return DB::getSchemaBuilder()->hasTable($tableName);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Validate that a column exists in a table
+     */
+    protected function validateColumnExists(string $tableName, string $columnName): bool
+    {
+        try {
+            return DB::getSchemaBuilder()->hasColumn($tableName, $columnName);
+        } catch (\Exception $e) {
+            return false;
         }
     }
 
@@ -106,6 +147,12 @@ class InventoryService
         $foreignKey = $setting->child_parent_foreign_key ?? 'parent_id';
 
         try {
+            // Validate table and column exist
+            if (!$this->validateTableExists($setting->child_table) || 
+                !$this->validateColumnExists($setting->child_table, $foreignKey)) {
+                return 0;
+            }
+
             $childIds = DB::table($setting->child_table)
                 ->where($foreignKey, $parentId)
                 ->pluck('id')
@@ -144,6 +191,13 @@ class InventoryService
         $hostnameColumn = $setting->child_hostname_column ?? 'ip_address';
 
         try {
+            // Validate table and columns exist
+            if (!$this->validateTableExists($setting->child_table) || 
+                !$this->validateColumnExists($setting->child_table, $foreignKey) ||
+                !$this->validateColumnExists($setting->child_table, $hostnameColumn)) {
+                return ['success' => false, 'message' => 'Invalid table or column configuration'];
+            }
+
             $hosts = DB::table($setting->child_table)
                 ->where($foreignKey, $parentId)
                 ->get();
