@@ -7,6 +7,15 @@ use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Models\Inventory;
 
+/**
+ * Service for building Ansible inventory files
+ * 
+ * Handles the creation of inventory files from static and dynamic sources,
+ * including host line generation, SSH key management, and host counting.
+ * 
+ * This service is responsible for translating database inventory records
+ * into Ansible-compatible inventory file formats.
+ */
 class InventoryBuilderService
 {
     /**

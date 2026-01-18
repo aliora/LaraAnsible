@@ -2,6 +2,15 @@
 
 namespace VisioSoft\LaraAnsible\Services;
 
+/**
+ * Service for parsing Ansible command output
+ * 
+ * Handles parsing of Ansible playbook execution output including:
+ * - Task progress tracking
+ * - PLAY RECAP parsing for deployment status
+ * - ANSI code stripping
+ * - Status resolution (success/failed/warning)
+ */
 class OutputParserService
 {
     /**

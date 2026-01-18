@@ -6,6 +6,18 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use VisioSoft\LaraAnsible\Models\Deployment;
 
+/**
+ * Main service for executing Ansible deployments
+ * 
+ * Orchestrates the deployment process by coordinating specialized services:
+ * - InventoryBuilderService: Creates inventory files
+ * - PlaybookManagerService: Manages playbook files
+ * - CommandBuilderService: Builds Ansible commands
+ * - OutputParserService: Parses execution output
+ * 
+ * This service follows the Single Responsibility Principle by delegating
+ * specific tasks to specialized services while managing the overall workflow.
+ */
 class AnsibleService
 {
     protected InventoryBuilderService $inventoryBuilder;

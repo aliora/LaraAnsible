@@ -4,10 +4,21 @@ namespace VisioSoft\LaraAnsible\Helpers;
 
 use Filament\Support\Facades\FilamentColor;
 
+/**
+ * Helper class for progress bar rendering in Filament columns
+ * 
+ * Provides methods to calculate progress, determine color schemes,
+ * and resolve theme-aware colors for progress indicators.
+ */
 class ProgressBarHelper
 {
     /**
      * Calculate progress percentage from processed and total values
+     * 
+     * @param int $processed Number of completed items
+     * @param int $total Total number of items
+     * @param int|null $storedProgress Pre-calculated progress to use if available
+     * @return float Progress percentage (0-100)
      */
     public static function calculateProgress(int $processed, int $total, ?int $storedProgress = null): float
     {
@@ -27,6 +38,9 @@ class ProgressBarHelper
 
     /**
      * Get semantic color name based on progress percentage
+     * 
+     * @param float $progressPercent Progress percentage (0-100)
+     * @return string Color name (success, info, warning, gray)
      */
     public static function getColorName(float $progressPercent): string
     {
@@ -40,6 +54,12 @@ class ProgressBarHelper
 
     /**
      * Resolve color value from Filament theme or use fallback
+     * 
+     * Attempts to retrieve the color from the Filament color palette.
+     * Falls back to hardcoded hex values if theme colors are unavailable.
+     * 
+     * @param string $colorName Semantic color name
+     * @return string CSS color value (hex or rgb)
      */
     public static function resolveColor(string $colorName): string
     {
@@ -80,6 +100,9 @@ class ProgressBarHelper
 
     /**
      * Get Tailwind background class for color
+     * 
+     * @param string $colorName Semantic color name
+     * @return string Tailwind CSS class
      */
     public static function getBgClass(string $colorName): string
     {

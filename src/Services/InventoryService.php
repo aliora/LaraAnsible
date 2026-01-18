@@ -6,6 +6,12 @@ use Illuminate\Support\Facades\DB;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Inventory;
 
+/**
+ * Service for managing inventory-related operations
+ * 
+ * Handles host counting, database imports, and inventory management
+ * for both static and dynamic inventory sources.
+ */
 class InventoryService
 {
     /**

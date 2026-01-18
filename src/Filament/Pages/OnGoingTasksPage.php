@@ -135,10 +135,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->modalDescription(fn (Deployment $record): string => "Do you want to repeat the job '{$record->taskTemplate?->name}' with the same configuration?")
                     ->modalSubmitActionLabel('Yes, Repeat')
                     ->action(function (Deployment $record): void {
-                        app(DeploymentService::class)->createWithInventoryIds(
-                            $record->inventory_ids ?? [],
-                            $record->task_template_id
-                        );
+                        app(DeploymentService::class)->repeatDeployment($record);
                     })
                     ->successNotificationTitle('Job repeated successfully'),
             ])

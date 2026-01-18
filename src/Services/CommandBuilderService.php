@@ -5,6 +5,12 @@ namespace VisioSoft\LaraAnsible\Services;
 use Illuminate\Support\Facades\Process;
 use VisioSoft\LaraAnsible\Models\Deployment;
 
+/**
+ * Service for building Ansible command strings
+ * 
+ * Constructs ansible-playbook commands with all necessary options,
+ * flags, and parameters. Also handles task counting via --list-tasks.
+ */
 class CommandBuilderService
 {
     /**

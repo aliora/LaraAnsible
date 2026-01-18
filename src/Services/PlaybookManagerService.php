@@ -4,6 +4,12 @@ namespace VisioSoft\LaraAnsible\Services;
 
 use VisioSoft\LaraAnsible\Models\Deployment;
 
+/**
+ * Service for managing Ansible playbook files
+ * 
+ * Handles playbook file creation, content retrieval from task templates,
+ * and template file management for Ansible deployments.
+ */
 class PlaybookManagerService
 {
     /**
