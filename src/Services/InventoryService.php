@@ -2,6 +2,7 @@
 
 namespace VisioSoft\LaraAnsible\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Inventory;
@@ -15,7 +16,17 @@ use VisioSoft\LaraAnsible\Models\Inventory;
 class InventoryService
 {
     /**
+     * Cache TTL for schema validation in seconds
+     */
+    const SCHEMA_CACHE_TTL = 3600; // 1 hour
+
+    /**
+     * Cache TTL for parent options in seconds
+     */
+    const PARENT_OPTIONS_CACHE_TTL = 300; // 5 minutes
+    /**
      * Calculate total host count from inventory IDs
+     * Optimized with select to fetch only needed columns
      */
     public function calculateHostCount(array $inventoryIds): int
     {
@@ -23,7 +34,11 @@ class InventoryService
             return 0;
         }
 
-        $inventories = Inventory::whereIn('id', $inventoryIds)->get();
+        // Only select columns needed for counting
+        $inventories = Inventory::whereIn('id', $inventoryIds)
+            ->select(['id', 'script', 'hosts_entry'])
+            ->get();
+        
         $totalHosts = 0;
 
         foreach ($inventories as $inventory) {
@@ -51,6 +66,7 @@ class InventoryService
 
     /**
      * Get parent options from configured table
+     * Cached for performance
      */
     public function getParentOptions(?AnsibleSetting $setting = null): array
     {
@@ -60,25 +76,34 @@ class InventoryService
             return [];
         }
 
-        try {
-            // Validate table exists
-            if (!$this->validateTableExists($setting->parent_table)) {
-                return [];
-            }
+        // Cache parent options to avoid repeated queries
+        return Cache::remember(
+            "inventory_parent_options_{$setting->id}_{$setting->parent_table}",
+            self::PARENT_OPTIONS_CACHE_TTL,
+            function () use ($setting) {
+                try {
+                    // Validate table exists
+                    if (!$this->validateTableExists($setting->parent_table)) {
+                        return [];
+                    }
 
-            $labelColumn = $setting->parent_label_column ?? 'name';
-            
-            // Validate column exists
-            if (!$this->validateColumnExists($setting->parent_table, $labelColumn)) {
-                return [];
-            }
+                    $labelColumn = $setting->parent_label_column ?? 'name';
+                    
+                    // Validate column exists
+                    if (!$this->validateColumnExists($setting->parent_table, $labelColumn)) {
+                        return [];
+                    }
 
-            return DB::table($setting->parent_table)
-                ->pluck($labelColumn, 'id')
-                ->toArray();
-        } catch (\Exception $e) {
-            return [];
-        }
+                    // Only select needed columns for performance
+                    return DB::table($setting->parent_table)
+                        ->select(['id', $labelColumn])
+                        ->pluck($labelColumn, 'id')
+                        ->toArray();
+                } catch (\Exception $e) {
+                    return [];
+                }
+            }
+        );
     }
 
     /**
@@ -111,26 +136,40 @@ class InventoryService
 
     /**
      * Validate that a table exists in the database
+     * Cached for performance
      */
     protected function validateTableExists(string $tableName): bool
     {
-        try {
-            return DB::getSchemaBuilder()->hasTable($tableName);
-        } catch (\Exception $e) {
-            return false;
-        }
+        return Cache::remember(
+            "schema_table_exists_{$tableName}",
+            self::SCHEMA_CACHE_TTL,
+            function () use ($tableName) {
+                try {
+                    return DB::getSchemaBuilder()->hasTable($tableName);
+                } catch (\Exception $e) {
+                    return false;
+                }
+            }
+        );
     }
 
     /**
      * Validate that a column exists in a table
+     * Cached for performance
      */
     protected function validateColumnExists(string $tableName, string $columnName): bool
     {
-        try {
-            return DB::getSchemaBuilder()->hasColumn($tableName, $columnName);
-        } catch (\Exception $e) {
-            return false;
-        }
+        return Cache::remember(
+            "schema_column_exists_{$tableName}_{$columnName}",
+            self::SCHEMA_CACHE_TTL,
+            function () use ($tableName, $columnName) {
+                try {
+                    return DB::getSchemaBuilder()->hasColumn($tableName, $columnName);
+                } catch (\Exception $e) {
+                    return false;
+                }
+            }
+        );
     }
 
     /**
@@ -198,8 +237,10 @@ class InventoryService
                 return ['success' => false, 'message' => 'Invalid table or column configuration'];
             }
 
+            // Only select needed columns for performance
             $hosts = DB::table($setting->child_table)
                 ->where($foreignKey, $parentId)
+                ->select(['id', $hostnameColumn])
                 ->get();
 
             $imported = 0;
@@ -247,6 +288,34 @@ class InventoryService
                 'success' => false,
                 'message' => $e->getMessage(),
             ];
+        }
+    }
+
+    /**
+     * Clear all caches related to inventory service
+     * Call this when settings change
+     */
+    public function clearCaches(?AnsibleSetting $setting = null): void
+    {
+        $setting = $setting ?? AnsibleSetting::getInstance();
+        
+        if ($setting && $setting->parent_table) {
+            Cache::forget("inventory_parent_options_{$setting->id}_{$setting->parent_table}");
+            Cache::forget("schema_table_exists_{$setting->parent_table}");
+            
+            if ($setting->parent_label_column) {
+                Cache::forget("schema_column_exists_{$setting->parent_table}_{$setting->parent_label_column}");
+            }
+        }
+        
+        if ($setting && $setting->child_table) {
+            Cache::forget("schema_table_exists_{$setting->child_table}");
+            
+            $foreignKey = $setting->child_parent_foreign_key ?? 'parent_id';
+            $hostnameColumn = $setting->child_hostname_column ?? 'ip_address';
+            
+            Cache::forget("schema_column_exists_{$setting->child_table}_{$foreignKey}");
+            Cache::forget("schema_column_exists_{$setting->child_table}_{$hostnameColumn}");
         }
     }
 }

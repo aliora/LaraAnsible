@@ -2,6 +2,7 @@
 
 namespace VisioSoft\LaraAnsible\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Deployment;
@@ -22,6 +23,11 @@ class InventoryBuilderService
      * Prefix for dynamic inventory identifiers
      */
     const DYNAMIC_INVENTORY_PREFIX = 'dynamic_';
+
+    /**
+     * Cache TTL for schema validation in seconds
+     */
+    const SCHEMA_CACHE_TTL = 3600; // 1 hour
     /**
      * Create temporary inventory file or use existing inventory file
      * Returns array with 'path' and 'host_count'
@@ -89,9 +95,16 @@ class InventoryBuilderService
         // Handle Static Inventories
         if (!empty($staticInventoryIds)) {
             if (in_array('all', $staticInventoryIds)) {
-                $inventories = Inventory::where('is_active', true)->get();
+                // Only select needed columns for performance
+                $inventories = Inventory::where('is_active', true)
+                    ->select(['id', 'script', 'hosts_entry', 'hostname', 'port', 'username'])
+                    ->with(['keystore:id,private_key']) // Eager load keystore
+                    ->get();
             } else {
-                $inventories = Inventory::whereIn('id', $staticInventoryIds)->get();
+                $inventories = Inventory::whereIn('id', $staticInventoryIds)
+                    ->select(['id', 'script', 'hosts_entry', 'hostname', 'port', 'username'])
+                    ->with(['keystore:id,private_key']) // Eager load keystore
+                    ->get();
             }
         }
 
@@ -161,26 +174,40 @@ class InventoryBuilderService
 
     /**
      * Validate that a table exists in the database
+     * Cached for performance
      */
     protected function validateTableExists(string $tableName): bool
     {
-        try {
-            return \DB::getSchemaBuilder()->hasTable($tableName);
-        } catch (\Exception $e) {
-            return false;
-        }
+        return Cache::remember(
+            "schema_table_exists_{$tableName}",
+            self::SCHEMA_CACHE_TTL,
+            function () use ($tableName) {
+                try {
+                    return \DB::getSchemaBuilder()->hasTable($tableName);
+                } catch (\Exception $e) {
+                    return false;
+                }
+            }
+        );
     }
 
     /**
      * Validate that a column exists in a table
+     * Cached for performance
      */
     protected function validateColumnExists(string $tableName, string $columnName): bool
     {
-        try {
-            return \DB::getSchemaBuilder()->hasColumn($tableName, $columnName);
-        } catch (\Exception $e) {
-            return false;
-        }
+        return Cache::remember(
+            "schema_column_exists_{$tableName}_{$columnName}",
+            self::SCHEMA_CACHE_TTL,
+            function () use ($tableName, $columnName) {
+                try {
+                    return \DB::getSchemaBuilder()->hasColumn($tableName, $columnName);
+                } catch (\Exception $e) {
+                    return false;
+                }
+            }
+        );
     }
 
     /**

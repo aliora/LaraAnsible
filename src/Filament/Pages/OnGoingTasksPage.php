@@ -42,8 +42,7 @@ class OnGoingTasksPage extends Page implements HasTable
         return $table
             ->query(
                 Deployment::query()
-                    ->with(['taskTemplate', 'user'])
-                    // Show all deployments, including history
+                    ->with(['taskTemplate:id,name', 'user:id,name']) // Eager load relationships
                     ->orderByDesc('created_at')
             )
             ->poll('3s')
