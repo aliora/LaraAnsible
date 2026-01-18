@@ -19,6 +19,10 @@ use VisioSoft\LaraAnsible\Models\Inventory;
 class InventoryBuilderService
 {
     /**
+     * Prefix for dynamic inventory identifiers
+     */
+    const DYNAMIC_INVENTORY_PREFIX = 'dynamic_';
+    /**
      * Create temporary inventory file or use existing inventory file
      * Returns array with 'path' and 'host_count'
      */
@@ -73,7 +77,7 @@ class InventoryBuilderService
                 break;
             }
 
-            if (is_string($id) && str_starts_with($id, 'dynamic_')) {
+            if (is_string($id) && str_starts_with($id, self::DYNAMIC_INVENTORY_PREFIX)) {
                 $dynamicInventoryIds[] = $id;
             } else {
                 $staticInventoryIds[] = $id;
@@ -115,11 +119,24 @@ class InventoryBuilderService
             return $inventories;
         }
 
+        // Validate table and column exist
+        if (!$this->validateTableExists($setting->child_table) || 
+            !$this->validateColumnExists($setting->child_table, $setting->child_hostname_column)) {
+            Log::warning("Invalid dynamic inventory configuration: table or column does not exist");
+            return $inventories;
+        }
+
         foreach ($dynamicInventoryIds as $dynamicId) {
             // key format: dynamic_{child_id}_{hostname}
             $parts = explode('_', $dynamicId);
             if (count($parts) >= 3) {
                 $childId = $parts[1];
+
+                // Validate child ID is numeric
+                if (!is_numeric($childId)) {
+                    Log::warning("Invalid child ID in dynamic inventory: {$childId}");
+                    continue;
+                }
 
                 try {
                     $child = \DB::table($setting->child_table)->find($childId);
@@ -140,6 +157,30 @@ class InventoryBuilderService
         }
 
         return $inventories;
+    }
+
+    /**
+     * Validate that a table exists in the database
+     */
+    protected function validateTableExists(string $tableName): bool
+    {
+        try {
+            return \DB::getSchemaBuilder()->hasTable($tableName);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Validate that a column exists in a table
+     */
+    protected function validateColumnExists(string $tableName, string $columnName): bool
+    {
+        try {
+            return \DB::getSchemaBuilder()->hasColumn($tableName, $columnName);
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 
     /**

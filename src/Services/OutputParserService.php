@@ -14,6 +14,20 @@ namespace VisioSoft\LaraAnsible\Services;
 class OutputParserService
 {
     /**
+     * Regex pattern for matching TASK lines in Ansible output
+     */
+    const TASK_LINE_PATTERN = '/^\s*TASK \[.*\]/m';
+
+    /**
+     * Regex pattern for matching host recap lines
+     */
+    const HOST_RECAP_PATTERN = '/^(\S+)\s*:\s*ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)/';
+
+    /**
+     * Regex pattern for ANSI color codes
+     */
+    const ANSI_CODE_PATTERN = '/\x1b\[[0-9;]*m/';
+    /**
      * Parse task progress from Ansible output
      */
     public function parseTaskProgress(string $outputBuffer, int $totalTasks): array
@@ -22,7 +36,7 @@ class OutputParserService
         
         // Count completed tasks
         $completedTasks = 0;
-        if (preg_match_all('/^\s*TASK \[.*\]/m', $cleanOutput, $matches)) {
+        if (preg_match_all(self::TASK_LINE_PATTERN, $cleanOutput, $matches)) {
             $completedTasks = count($matches[0]);
         }
 
@@ -114,7 +128,7 @@ class OutputParserService
             }
 
             // Parse host recap line: hostname : ok=X changed=X unreachable=X failed=X ...
-            if (preg_match('/^(\S+)\s*:\s*ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)/', $trim, $matches)) {
+            if (preg_match(self::HOST_RECAP_PATTERN, $trim, $matches)) {
                 $totalHosts++;
                 $ok = (int) $matches[2];
                 $changed = (int) $matches[3];
@@ -151,7 +165,7 @@ class OutputParserService
      */
     public function stripAnsiCodes(string $output): string
     {
-        return preg_replace('/\x1b\[[0-9;]*m/', '', $output);
+        return preg_replace(self::ANSI_CODE_PATTERN, '', $output);
     }
 
     /**
