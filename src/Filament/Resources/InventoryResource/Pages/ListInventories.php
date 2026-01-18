@@ -15,6 +15,7 @@ use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Inventory;
+use VisioSoft\LaraAnsible\Services\InventoryService;
 
 class ListInventories extends ListRecords
 {
@@ -28,7 +29,7 @@ class ListInventories extends ListRecords
     protected function getHeaderActions(): array
     {
         $setting = AnsibleSetting::getInstance();
-        $foreignKey = $setting?->child_parent_foreign_key ?? 'parent_id';
+        $inventoryService = app(InventoryService::class);
 
         return [
             Actions\CreateAction::make(),
@@ -38,22 +39,12 @@ class ListInventories extends ListRecords
                 ->icon('heroicon-o-arrow-down-circle')
                 ->color('info')
                 ->visible(fn () => $setting && $setting->child_table)
-                ->form(function () use ($setting, $foreignKey) {
+                ->form(function () use ($setting, $inventoryService) {
                     if (! $setting || ! $setting->child_table) {
                         return [];
                     }
 
-                    $parentOptions = [];
-                    if ($setting->parent_table) {
-                        try {
-                            $labelColumn = $setting->parent_label_column ?? 'name';
-                            $parentOptions = DB::table($setting->parent_table)
-                                ->pluck($labelColumn, 'id')
-                                ->toArray();
-                        } catch (\Exception $e) {
-                            $parentOptions = [];
-                        }
-                    }
+                    $parentOptions = $inventoryService->getParentOptions($setting);
 
                     return [
                         Forms\Components\Select::make('parent_id')
@@ -69,69 +60,39 @@ class ListInventories extends ListRecords
                             ->schema([
                                 Forms\Components\Placeholder::make('total')
                                     ->label('Total Hosts')
-                                    ->content(function (callable $get) use ($setting, $foreignKey) {
+                                    ->content(function (callable $get) use ($setting, $inventoryService) {
                                         $parentId = $get('parent_id');
                                         if (! $parentId || ! $setting) {
                                             return '-';
                                         }
-
-                                        try {
-                                            return DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->count();
-                                        } catch (\Exception $e) {
-                                            return '-';
-                                        }
+                                        $count = $inventoryService->getChildHostsCount($parentId, $setting);
+                                        return $count > 0 ? $count : '-';
                                     })
                                     ->icon('heroicon-o-server-stack')
                                     ->iconColor('gray'),
 
                                 Forms\Components\Placeholder::make('imported')
                                     ->label('Imported')
-                                    ->content(function (callable $get) use ($setting, $foreignKey) {
+                                    ->content(function (callable $get) use ($setting, $inventoryService) {
                                         $parentId = $get('parent_id');
                                         if (! $parentId || ! $setting) {
                                             return '-';
                                         }
-
-                                        try {
-                                            $childIds = DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->pluck('id')
-                                                ->toArray();
-
-                                            return count($this->getImportedChildIds($childIds));
-                                        } catch (\Exception $e) {
-                                            return '-';
-                                        }
+                                        $count = $inventoryService->getImportedHostsCount($parentId, $setting);
+                                        return $count > 0 ? $count : '-';
                                     })
                                     ->icon('heroicon-o-check-circle')
                                     ->iconColor('success'),
 
                                 Forms\Components\Placeholder::make('available')
                                     ->label('Available')
-                                    ->content(function (callable $get) use ($setting, $foreignKey) {
+                                    ->content(function (callable $get) use ($setting, $inventoryService) {
                                         $parentId = $get('parent_id');
                                         if (! $parentId || ! $setting) {
                                             return '-';
                                         }
-
-                                        try {
-                                            $total = DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->count();
-
-                                            $childIds = DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->pluck('id')
-                                                ->toArray();
-
-                                            $imported = count($this->getImportedChildIds($childIds));
-
-                                            return max(0, $total - $imported);
-                                        } catch (\Exception $e) {
-                                            return '-';
-                                        }
+                                        $count = $inventoryService->getNewHostsCount($parentId, $setting);
+                                        return $count > 0 ? $count : '-';
                                     })
                                     ->icon('heroicon-o-plus-circle')
                                     ->iconColor('primary'),
