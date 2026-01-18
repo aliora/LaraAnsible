@@ -23,11 +23,10 @@ class DeploymentService
         ?int $userId = null,
         bool $notify = true
     ): Deployment {
-        // Debug: Log input parameters
         \Log::info("DeploymentService::createWithInventoryIds called");
-        \Log::info("Inventory IDs: ".json_encode($inventoryIds));
+        \Log::info("Inventory IDs: " . json_encode($inventoryIds));
         \Log::info("Task Template ID: {$taskTemplateId}");
-        \Log::info("User ID: ".($userId ?? auth()->id() ?? 'null'));
+        \Log::info("User ID: " . ($userId ?? auth()->id() ?? 'null'));
 
         $deployment = Deployment::create([
             'task_template_id' => $taskTemplateId,
@@ -37,19 +36,31 @@ class DeploymentService
             'total_hosts' => count($inventoryIds),
         ]);
 
-        // Debug: Log created deployment
-        \Log::info("Created deployment: id={$deployment->id}, inventory_ids=".json_encode($deployment->inventory_ids));
+        \Log::info("Created deployment: id={$deployment->id}, inventory_ids=" . json_encode($deployment->inventory_ids));
 
         ExecuteAnsibleDeployment::dispatch($deployment);
 
         if ($notify) {
             Notification::make()
                 ->title('Görev Başlatıldı')
-                ->body(count($inventoryIds).' cihaz için görev kuyruğa alındı.')
+                ->body(count($inventoryIds) . ' cihaz için görev kuyruğa alındı.')
                 ->success()
                 ->send();
         }
 
         return $deployment;
+    }
+
+    /**
+     * Repeat a deployment with the same configuration
+     */
+    public function repeatDeployment(Deployment $deployment, bool $notify = true): Deployment
+    {
+        return $this->createWithInventoryIds(
+            $deployment->inventory_ids ?? [],
+            $deployment->task_template_id,
+            auth()->id(),
+            $notify
+        );
     }
 }

@@ -14,6 +14,7 @@ use Illuminate\Support\HtmlString;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Services\DeploymentService;
+use VisioSoft\LaraAnsible\Services\InventoryService;
 
 class OnGoingTasksPage extends Page implements HasTable
 {
@@ -41,8 +42,7 @@ class OnGoingTasksPage extends Page implements HasTable
         return $table
             ->query(
                 Deployment::query()
-                    ->with(['taskTemplate', 'user'])
-                    // Show all deployments, including history
+                    ->with(['taskTemplate:id,name', 'user:id,name']) // Eager load relationships
                     ->orderByDesc('created_at')
             )
             ->poll('3s')
@@ -56,21 +56,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->label('Hosts')
                     ->state(function (Deployment $record): int {
                         $inventoryIds = $record->inventory_ids ?? [];
-                        if (empty($inventoryIds)) {
-                            return 0;
-                        }
-                        $inventories = \VisioSoft\LaraAnsible\Models\Inventory::whereIn('id', $inventoryIds)->get();
-                        $totalHosts = 0;
-                        foreach ($inventories as $inventory) {
-                            if (! empty($inventory->script)) {
-                                preg_match_all('/^([a-zA-Z0-9_.-]+)\s+ansible_host=/m', $inventory->script, $matches);
-                                $totalHosts += count($matches[1] ?? []);
-                            } elseif (! empty($inventory->hosts_entry)) {
-                                $totalHosts += count($inventory->hosts_entry);
-                            }
-                        }
-
-                        return $totalHosts;
+                        return app(InventoryService::class)->calculateHostCount($inventoryIds);
                     })
                     ->badge()
                     ->color('info')
@@ -148,10 +134,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->modalDescription(fn (Deployment $record): string => "Do you want to repeat the job '{$record->taskTemplate?->name}' with the same configuration?")
                     ->modalSubmitActionLabel('Yes, Repeat')
                     ->action(function (Deployment $record): void {
-                        app(DeploymentService::class)->createWithInventoryIds(
-                            $record->inventory_ids ?? [],
-                            $record->task_template_id
-                        );
+                        app(DeploymentService::class)->repeatDeployment($record);
                     })
                     ->successNotificationTitle('Job repeated successfully'),
             ])
