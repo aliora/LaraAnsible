@@ -52,27 +52,6 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->searchable()
                     ->sortable()
                     ->icon('heroicon-o-command-line'),
-                Tables\Columns\TextColumn::make('inventories')
-                    ->label('Inventories')
-                    ->formatStateUsing(function (Deployment $record): string {
-                        $inventoryIds = $record->inventory_ids ?? [];
-                        if (empty($inventoryIds)) {
-                            return '-';
-                        }
-                        $inventories = \VisioSoft\LaraAnsible\Models\Inventory::whereIn('id', $inventoryIds)->pluck('name');
-
-                        return $inventories->join(', ');
-                    })
-                    ->wrap()
-                    ->tooltip(function (Deployment $record): ?string {
-                        $inventoryIds = $record->inventory_ids ?? [];
-                        if (empty($inventoryIds)) {
-                            return null;
-                        }
-                        $inventories = \VisioSoft\LaraAnsible\Models\Inventory::whereIn('id', $inventoryIds)->pluck('name');
-
-                        return $inventories->join(', ');
-                    }),
                 Tables\Columns\TextColumn::make('total_hosts')
                     ->label('Hosts')
                     ->state(function (Deployment $record): int {
@@ -96,33 +75,9 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->badge()
                     ->color('info')
                     ->suffix(' hosts'),
-                Tables\Columns\TextColumn::make('progress')
+                Tables\Columns\ViewColumn::make('progress')
                     ->label('Progress')
-                    ->formatStateUsing(function ($state, Deployment $record): HtmlString {
-                        $processed = $record->processed_hosts ?? 0;
-                        $total = $record->total_hosts ?? 0;
-                        $progress = 0.0;
-                        if ($total > 0) {
-                            $progress = ($processed / $total) * 100;
-                        }
-                        $progress = round(max(0, min(100, $progress)), 1);
-
-                        $colorClass = match (true) {
-                            $progress >= 100 => 'bg-green-500',
-                            $progress >= 50 => 'bg-blue-500',
-                            $progress > 0 => 'bg-amber-500',
-                            default => 'bg-gray-300',
-                        };
-
-                        return new HtmlString(
-                            '<div class="flex items-center gap-2 min-w-[120px]">'.
-                            '<div class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">'.
-                            '<div class="h-full '.$colorClass.' rounded-full transition-all duration-300" style="width: '.$progress.'%"></div>'.
-                            '</div>'.
-                            '<span class="text-xs font-medium text-gray-600 dark:text-gray-400 whitespace-nowrap">'.$processed.'/'.$total.'</span>'.
-                            '</div>'
-                        );
-                    }),
+                    ->view('laraansible::filament.columns.progress-bar'),
                 Tables\Columns\BadgeColumn::make('status')
                     ->label('Status')
                     ->colors([
@@ -152,7 +107,8 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->placeholder('-'),
                 Tables\Columns\TextColumn::make('started_at')
                     ->label('Started At')
-                    ->dateTime('d.m.Y H:i')
+                    ->dateTime('d.m.Y H:i:s')
+                    ->description(fn (Deployment $record): ?string => $record->completed_at ? 'Ended: ' . $record->completed_at->format('d.m.Y H:i:s') : null)
                     ->sortable(),
             ])
             ->filters([
@@ -168,7 +124,7 @@ class OnGoingTasksPage extends Page implements HasTable
             ])
             ->actions([
                 Actions\Action::make('watch_terminal')
-                    ->label('Watch Output')
+                    ->label('Logs')
                     ->icon('heroicon-o-computer-desktop')
                     ->color('info')
                     ->button()
@@ -183,7 +139,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Close'),
                 Actions\Action::make('repeat_job')
-                    ->label('Repeat')
+                    ->label(' ')
                     ->icon('heroicon-o-arrow-path')
                     ->color('warning')
                     ->button()

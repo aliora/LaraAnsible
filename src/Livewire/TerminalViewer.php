@@ -17,10 +17,15 @@ class TerminalViewer extends Component
     public function render()
     {
         $deployment = Deployment::find($this->deploymentId);
+        $status = $deployment?->status ?? 'unknown';
+
+        // Define terminal statuses
+        $isFinished = in_array($status, ['success', 'failed', 'warning']);
 
         return view('laraansible::livewire.terminal-viewer', [
             'output' => $deployment?->command_output ?? 'Yükleniyor...',
-            'status' => $deployment?->status ?? 'unknown',
+            'status' => $status,
+            'isFinished' => $isFinished,
         ]);
     }
 }
