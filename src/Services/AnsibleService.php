@@ -73,39 +73,39 @@ class AnsibleService
                     'ANSIBLE_STDOUT_CALLBACK' => 'default',
                 ])
                 ->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, &$completedTasks, $totalTasks, $deployment) {
-                $outputBuffer .= $output;
+                    $outputBuffer .= $output;
 
-                // Parse Ansible output to track progress
+                    // Parse Ansible output to track progress
 
-                // Count tasks in the accumulated output buffer.
-                // TASK lines are emitted once per task (not per host).
-                $cleanOutput = preg_replace('/\x1b\[[0-9;]*m/', '', $outputBuffer);
-                $completedTasks = 0;
-                if (preg_match_all('/^\s*TASK \[.*\]/m', $cleanOutput, $matches)) {
-                    $completedTasks = count($matches[0]);
-                }
+                    // Count tasks in the accumulated output buffer.
+                    // TASK lines are emitted once per task (not per host).
+                    $cleanOutput = preg_replace('/\x1b\[[0-9;]*m/', '', $outputBuffer);
+                    $completedTasks = 0;
+                    if (preg_match_all('/^\s*TASK \[.*\]/m', $cleanOutput, $matches)) {
+                        $completedTasks = count($matches[0]);
+                    }
 
-                $processedTasks = min($completedTasks, $totalTasks);
+                    $processedTasks = min($completedTasks, $totalTasks);
 
-                // Calculate progress percentage based on TASKS
-                $progress = 0;
-                if ($totalTasks > 0) {
-                    $progress = min(100, (int) round(($processedTasks / $totalTasks) * 100));
-                }
+                    // Calculate progress percentage based on TASKS
+                    $progress = 0;
+                    if ($totalTasks > 0) {
+                        $progress = min(100, (int) round(($processedTasks / $totalTasks) * 100));
+                    }
 
-                // If we see PLAY RECAP, we're likely done or close to it.
-                if (str_contains($cleanOutput, 'PLAY RECAP')) {
-                    $progress = 100;
-                    $processedTasks = $totalTasks;
-                }
+                    // If we see PLAY RECAP, we're likely done or close to it.
+                    if (str_contains($cleanOutput, 'PLAY RECAP')) {
+                        $progress = 100;
+                        $processedTasks = $totalTasks;
+                    }
 
-                // Update deployment with partial output and progress for real-time viewing
-                $deployment->update([
-                    'command_output' => $outputBuffer,
-                    'progress' => $progress,
-                    'processed_hosts' => $processedTasks,
-                ]);
-            });
+                    // Update deployment with partial output and progress for real-time viewing
+                    $deployment->update([
+                        'command_output' => $outputBuffer,
+                        'progress' => $progress,
+                        'processed_hosts' => $processedTasks,
+                    ]);
+                });
 
             Log::info("Command executed with exit code: {$result->exitCode()}");
 
@@ -162,12 +162,13 @@ class AnsibleService
         // For custom inventory files, we might just have to scan it or default to 1 count logic if not parsed.
         // Let's try to count lines with "ansible_host" as a heuristic for custom files too.
         if ($deployment->inventory_file && file_exists($deployment->inventory_file)) {
-             $content = file_get_contents($deployment->inventory_file);
-             $count = substr_count($content, 'ansible_host='); // Basic heuristic
-             return [
-                 'path' => $deployment->inventory_file,
-                 'host_count' => max(1, $count)
-             ];
+            $content = file_get_contents($deployment->inventory_file);
+            $count = substr_count($content, 'ansible_host='); // Basic heuristic
+
+            return [
+                'path' => $deployment->inventory_file,
+                'host_count' => max(1, $count),
+            ];
         }
 
         $inventoryIds = $deployment->inventory_ids ?? [];
@@ -391,10 +392,16 @@ class AnsibleService
 
             foreach ($ungroupedInventories as $inventory) {
                 Log::info("Processing ungrouped inventory: id={$inventory->id}, hostname={$inventory->hostname}, script=".(! empty($inventory->script) ? 'YES' : 'NO'));
-                if (! empty($inventory->script) && $inventory->source_type !== 'dynamic') {
-                    Log::info('Skipping script-based inventory');
 
-                    continue; // Skip script-based inventories for now
+                // Handle script-based inventories
+                if (! empty($inventory->script) && $inventory->source_type !== 'dynamic') {
+                    Log::info('Processing script-based inventory');
+                    foreach ($this->extractHostLinesFromInventoryScript($inventory->script) as $hostLine) {
+                        $allHosts[] = $hostLine;
+                        $content .= $hostLine."\n";
+                    }
+
+                    continue;
                 }
 
                 $hostsEntry = Inventory::normalizeHostsEntry($inventory->hosts_entry ?? []);
@@ -482,7 +489,7 @@ class AnsibleService
 
         return [
             'path' => $path,
-            'host_count' => count($allHosts)
+            'host_count' => count($allHosts),
         ];
     }
 
@@ -911,6 +918,7 @@ class AnsibleService
         foreach ($lines as $line) {
             if (str_contains($line, 'PLAY RECAP')) {
                 $inRecap = true;
+
                 continue;
             }
 
@@ -923,6 +931,7 @@ class AnsibleService
                 if ($totalHosts > 0) {
                     break;
                 }
+
                 continue;
             }
 
@@ -941,21 +950,21 @@ class AnsibleService
                 if ($hasFailure) {
                     $hostsWithFailure++;
                 }
-                
+
                 // If a host has both failure and success (e.g. some tasks OK then failed), it counts as failure for the host status usually.
                 // But for the global status, we checking if *any* host succeeded.
-                
+
                 if ($hasSuccess && ! $hasFailure) {
-                     $hostsWithSuccess++;
+                    $hostsWithSuccess++;
                 } elseif ($hasSuccess && $hasFailure) {
                     // Logic check: if a host partially succeeded but eventually failed, does it count towards "hostsWithSuccess"?
                     // The goal of "warning" is: "Some hosts failed, but AT LEAST ONE host was fully successful"?
                     // Or "Some hosts failed, but some operation succeeded"?
-                    
+
                     // Usually "Warning" means: Mix of successful hosts and failed hosts.
                     // If Host A fails, Host B succeeds -> Warning.
                     // If Host A partially succeeds then fails -> Failed (for that host).
-                    
+
                     // So we only count hostsWithSuccess if they strictly didn't fail?
                     // Let's stick to strict success for "hostsWithSuccess".
                 }

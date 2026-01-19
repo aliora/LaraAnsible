@@ -32,7 +32,7 @@ class ListInventories extends ListRecords
 
         return [
             Actions\CreateAction::make(),
-            
+
             Actions\Action::make('import_from_database')
                 ->label('Import Hosts')
                 ->icon('heroicon-o-arrow-down-circle')
@@ -147,59 +147,59 @@ class ListInventories extends ListRecords
                                         'class' => 'laraansible-hosts-checkbox-list',
                                     ])
                                     ->options(function (callable $get) use ($setting, $foreignKey) {
-                                $parentId = $get('parent_id');
-                                if (! $parentId) {
-                                    return [];
-                                }
+                                        $parentId = $get('parent_id');
+                                        if (! $parentId) {
+                                            return [];
+                                        }
 
-                                try {
-                                    $labelColumn = $setting->child_label_column ?? 'name';
-                                    $hostnameColumn = $setting->child_hostname_column;
-                                    $versionColumn = $setting->version_column;
+                                        try {
+                                            $labelColumn = $setting->child_label_column ?? 'name';
+                                            $hostnameColumn = $setting->child_hostname_column;
+                                            $versionColumn = $setting->version_column;
 
-                                    $children = DB::table($setting->child_table)
-                                        ->where($foreignKey, $parentId)
-                                        ->get();
+                                            $children = DB::table($setting->child_table)
+                                                ->where($foreignKey, $parentId)
+                                                ->get();
 
-                                    $existingChildIds = $this->getImportedChildIds($children->pluck('id')->all());
+                                            $existingChildIds = $this->getImportedChildIds($children->pluck('id')->all());
 
-                                    return $children->mapWithKeys(function ($child) use ($labelColumn, $hostnameColumn, $versionColumn, $existingChildIds) {
-                                        $label = $child->{$labelColumn} ?? 'Unknown';
-                                        $hostname = $child->{$hostnameColumn} ?? 'N/A';
-                                        $version = $versionColumn && isset($child->{$versionColumn}) ? $child->{$versionColumn} : 'N/A';
-                                        $isImported = in_array($child->id, $existingChildIds);
-                                        
-                                        // Icons using Heroicons style paths but simpler color scheme
-                                        $serverIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>';
-                                        $ipIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>';
-                                        $versionIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>';
-                                        
-                                        $statusIcon = $isImported 
-                                            ? '<svg class="w-4 h-4 text-success-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>'
-                                            : '<svg class="w-4 h-4 text-primary-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+                                            return $children->mapWithKeys(function ($child) use ($labelColumn, $hostnameColumn, $versionColumn, $existingChildIds) {
+                                                $label = $child->{$labelColumn} ?? 'Unknown';
+                                                $hostname = $child->{$hostnameColumn} ?? 'N/A';
+                                                $version = $versionColumn && isset($child->{$versionColumn}) ? $child->{$versionColumn} : 'N/A';
+                                                $isImported = in_array($child->id, $existingChildIds);
 
-                                        $bgClass = $isImported 
-                                            ? 'bg-success-50/50 dark:bg-success-900/10 border-success-200 dark:border-success-800' 
-                                            : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-700';
+                                                // Icons using Heroicons style paths but simpler color scheme
+                                                $serverIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>';
+                                                $ipIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>';
+                                                $versionIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>';
 
-                                        $opacityClass = $isImported ? 'opacity-75' : '';
+                                                $statusIcon = $isImported
+                                                    ? '<svg class="w-4 h-4 text-success-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>'
+                                                    : '<svg class="w-4 h-4 text-primary-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
 
-                                        $fullLabel = '<div class="flex items-center gap-4 py-2 px-3 rounded-lg border transition duration-150 ' . $bgClass . ' ' . $opacityClass . ' w-full">'
-                                            . '<div class="flex items-center gap-2 min-w-[150px] font-medium text-gray-900 dark:text-white">' . $serverIcon . ' <span class="truncate">' . $label . '</span></div>'
-                                            . '<div class="flex items-center gap-1.5 min-w-[120px] text-sm text-gray-600 dark:text-gray-400">' . $ipIcon . ' <span class="truncate">' . $hostname . '</span></div>'
-                                            . '<div class="flex items-center gap-1.5 min-w-[80px] text-sm text-gray-500 dark:text-gray-400">' . $versionIcon . ' <span class="truncate">' . $version . '</span></div>'
-                                            . '<div class="ml-auto flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider ' . ($isImported ? 'text-success-600 dark:text-success-400' : 'text-primary-600 dark:text-primary-400') . '">' . $statusIcon . ' <span>' . ($isImported ? 'Imported' : 'Available') . '</span></div>'
-                                            . '</div>';
-                                        
-                                        return [$child->id => new HtmlString($fullLabel)];
-                                    })->toArray();
-                                } catch (\Exception $e) {
-                                    return [];
-                                }
-                            })
-                            ->bulkToggleable()
-                            ->columns(1)
-                            ->required()
+                                                $bgClass = $isImported
+                                                    ? 'bg-success-50/50 dark:bg-success-900/10 border-success-200 dark:border-success-800'
+                                                    : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-700';
+
+                                                $opacityClass = $isImported ? 'opacity-75' : '';
+
+                                                $fullLabel = '<div class="flex items-center gap-4 py-2 px-3 rounded-lg border transition duration-150 '.$bgClass.' '.$opacityClass.' w-full">'
+                                                    .'<div class="flex items-center gap-2 min-w-[150px] font-medium text-gray-900 dark:text-white">'.$serverIcon.' <span class="truncate">'.$label.'</span></div>'
+                                                    .'<div class="flex items-center gap-1.5 min-w-[120px] text-sm text-gray-600 dark:text-gray-400">'.$ipIcon.' <span class="truncate">'.$hostname.'</span></div>'
+                                                    .'<div class="flex items-center gap-1.5 min-w-[80px] text-sm text-gray-500 dark:text-gray-400">'.$versionIcon.' <span class="truncate">'.$version.'</span></div>'
+                                                    .'<div class="ml-auto flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider '.($isImported ? 'text-success-600 dark:text-success-400' : 'text-primary-600 dark:text-primary-400').'">'.$statusIcon.' <span>'.($isImported ? 'Imported' : 'Available').'</span></div>'
+                                                    .'</div>';
+
+                                                return [$child->id => new HtmlString($fullLabel)];
+                                            })->toArray();
+                                        } catch (\Exception $e) {
+                                            return [];
+                                        }
+                                    })
+                                    ->bulkToggleable()
+                                    ->columns(1)
+                                    ->required(),
                             ])
                             ->columnSpanFull()
                             ->visible(fn (callable $get): bool => ! empty($get('parent_id'))),
@@ -251,12 +251,14 @@ class ListInventories extends ListRecords
                         foreach ($children as $child) {
                             if (in_array($child->id, $existingChildIds)) {
                                 $skipped++;
+
                                 continue;
                             }
 
                             $hostname = $child->{$hostnameColumn} ?? null;
                             if (! $hostname) {
                                 $skipped++;
+
                                 continue;
                             }
 
@@ -265,7 +267,8 @@ class ListInventories extends ListRecords
                             if ($alias === '') {
                                 $alias = 'host_'.$child->id;
                             }
-                            $alias = preg_replace('/[^a-zA-Z0-9_.-]/', '_', $alias);
+                            // Keep spaces and other Ansible-compatible chars, only replace special chars
+                            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', $alias);
 
                             $finalAlias = $alias;
                             $suffix = 2;

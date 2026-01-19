@@ -47,25 +47,35 @@ class Inventory extends Model
         $names = $this->name_list ?? [];
         $ips = $this->ip_list ?? [];
 
-        if (! empty($ips)) {
-            $firstKey = array_key_first($ips);
-            $firstIp = $firstKey !== null ? $ips[$firstKey] : null;
-            if (is_array($firstIp) && (array_key_exists('key', $firstIp) || array_key_exists('value', $firstIp))) {
-                $normalized = self::normalizeHostsEntry($ips);
-                if (! empty($normalized)) {
-                    return $normalized;
-                }
+        // If ip_list is stored as JSON string, decode it
+        if (is_string($ips)) {
+            $ips = json_decode($ips, true) ?? [];
+        }
+
+        // If names and ips are both arrays with same count, combine them
+        if (is_array($names) && is_array($ips)) {
+            if (is_string($names)) {
+                $names = json_decode($names, true) ?? [];
+            }
+
+            if (! empty($names) && ! empty($ips) && count($names) === count($ips)) {
+                return array_combine($names, $ips);
             }
         }
 
-        // If lists are present, use them
-        if (!empty($names) && !empty($ips) && count($names) === count($ips)) {
-             return array_combine($names, $ips);
+        // If ip_list is already an associative array with keys (from newer format)
+        if (is_array($ips) && ! empty($ips)) {
+            // Check if it's already a key => value map
+            $firstKey = array_key_first($ips);
+            if ($firstKey !== 0 && is_string($firstKey)) {
+                // It's already a proper map
+                return $ips;
+            }
         }
 
         // Fallback: if lists are empty but hostname exists, show it as a single entry
         if ($this->hostname) {
-             return [$this->name => $this->hostname];
+            return [$this->name => $this->hostname];
         }
 
         return [];
@@ -75,10 +85,10 @@ class Inventory extends Model
     {
         $hosts = self::normalizeHostsEntry($value);
 
-        if (!empty($hosts)) {
+        if (! empty($hosts)) {
             $this->attributes['name_list'] = json_encode(array_keys($hosts));
-            $this->attributes['ip_list'] = json_encode(array_values($hosts));
-            
+            $this->attributes['ip_list'] = json_encode($hosts);
+
             // For backward compatibility and single-host logic elsewhere,
             // set 'hostname' to the FIRST IP in the list.
             $firstIp = reset($hosts);
@@ -124,7 +134,7 @@ class Inventory extends Model
                 }
 
                 $key = trim((string) ($entry['key'] ?? ''));
-                $val = trim((string) ($entry['value'] ?? ''));
+                $val = preg_replace('/[\r\n\t]+/', '', trim((string) ($entry['value'] ?? '')));
 
                 if ($key === '' || $val === '') {
                     continue;
@@ -140,18 +150,19 @@ class Inventory extends Model
         foreach ($value as $key => $val) {
             if (is_array($val)) {
                 $keyCandidate = trim((string) ($val['key'] ?? ''));
-                $valCandidate = trim((string) ($val['value'] ?? ''));
+                $valCandidate = preg_replace('/[\r\n\t]+/', '', trim((string) ($val['value'] ?? '')));
 
                 if ($keyCandidate === '' || $valCandidate === '') {
                     continue;
                 }
 
                 $hosts[$keyCandidate] = $valCandidate;
+
                 continue;
             }
 
             $key = trim((string) $key);
-            $val = trim((string) $val);
+            $val = preg_replace('/[\r\n\t]+/', '', trim((string) $val));
 
             if ($key === '' || $val === '') {
                 continue;
@@ -178,10 +189,12 @@ class Inventory extends Model
 
         $lines = [];
         $lines[] = "[{$sanitizedGroupName}]";
-        $lines[] = "";
+        $lines[] = '';
 
         foreach ($hosts as $name => $ip) {
-            $alias = preg_replace('/[^a-zA-Z0-9_.-]/', '_', trim((string) $name));
+            // Keep the original hostname but replace only Ansible-incompatible special chars
+            // Allow spaces, letters, numbers, dots, hyphens, underscores
+            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', trim((string) $name));
             $hostIp = trim((string) $ip);
 
             if ($alias === '' || $hostIp === '') {
@@ -191,7 +204,7 @@ class Inventory extends Model
             $lines[] = "{$alias} ansible_host={$hostIp}";
         }
 
-        $lines[] = "";
+        $lines[] = '';
         $lines[] = "[{$sanitizedGroupName}:vars]";
 
         $sshUser = trim((string) $sshUser);
@@ -306,6 +319,7 @@ class Inventory extends Model
                         $result['name'] = $header;
                     }
                 }
+
                 continue;
             }
 
@@ -339,5 +353,4 @@ class Inventory extends Model
 
         return $result;
     }
-
 }
