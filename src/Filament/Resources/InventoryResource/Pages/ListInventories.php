@@ -277,7 +277,9 @@ class ListInventories extends ListRecords
                                 $suffix++;
                             }
 
-                            $hostsEntry[$finalAlias] = $hostname;
+                            // Clean hostname - remove any embedded newlines/tabs
+                            $cleanHostname = preg_replace('/[\r\n\t]+/', '', $hostname);
+                            $hostsEntry[$finalAlias] = $cleanHostname;
                             $importedChildIds[] = $child->id;
 
                             if ($portColumn && isset($child->{$portColumn})) {
