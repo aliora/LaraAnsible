@@ -9,7 +9,6 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
-use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use VisioSoft\LaraAnsible\Filament\Resources\TaskTemplateResource\Pages;
 use VisioSoft\LaraAnsible\Models\TaskTemplate;
 
@@ -33,82 +32,26 @@ class TaskTemplateResource extends Resource
             ->schema([
                 Section::make('Template Details')
                     ->icon('heroicon-o-clipboard-document-list')
+                    ->extraAttributes(['class' => 'laraansible-full-form'])
+                    ->columns(1)
                     ->schema([
                         Forms\Components\TextInput::make('name')
                             ->label('Template Name')
                             ->required()
-                            ->maxLength(255),
+                            ->maxLength(255)
+                            ->placeholder('e.g. Install Gate')
+                            ->columnSpanFull(),
                         Forms\Components\Textarea::make('playbook_content')
                             ->label('Playbook YAML')
-                            ->rows(12)
                             ->required()
-                            ->extraInputAttributes(['style' => 'font-family: monospace;']),
-                    ]),
-                Section::make('Associated Files')
-                    ->icon('heroicon-o-document-duplicate')
-                    ->description('Ansible template files (Jinja2)')
-                    ->extraAttributes(['style' => 'max-height: 500px; overflow-y: auto;'])
-                    ->schema([
-                        Forms\Components\FileUpload::make('template_upload')
-                            ->label('Upload Template File')
-                            ->helperText('Upload a Jinja2 template file to populate the fields below.')
-                            ->multiple()
-                            ->maxFiles(25)
-                            ->appendFiles()
-                            ->storeFiles(false)
-                            ->dehydrated(false)
-                            ->afterStateUpdated(function ($state, $set, $get): void {
-                                if (! $state) {
-                                    return;
-                                }
-
-                                $files = is_array($state) ? $state : [$state];
-                                $templates = $get('templates') ?? [];
-
-                                foreach ($files as $file) {
-                                    if (! $file instanceof TemporaryUploadedFile) {
-                                        continue;
-                                    }
-
-                                    $name = $file->getClientOriginalName();
-                                    $content = $file->get();
-                                    $updated = false;
-
-                                    foreach ($templates as $index => $template) {
-                                        if (($template['name'] ?? null) === $name) {
-                                            $templates[$index]['content'] = $content;
-                                            $updated = true;
-                                            break;
-                                        }
-                                    }
-
-                                    if (! $updated) {
-                                        $templates[] = [
-                                            'name' => $name,
-                                            'content' => $content,
-                                        ];
-                                    }
-                                }
-
-                                $set('templates', array_values($templates));
-                                $set('template_upload', null);
-                            }),
-                        Forms\Components\Repeater::make('templates')
-                            ->hiddenLabel()
-                            ->schema([
-                                Forms\Components\TextInput::make('name')
-                                    ->label('Filename')
-                                    ->required()
-                                    ->placeholder('nginx.conf.j2'),
-                                Forms\Components\Textarea::make('content')
-                                    ->label('Content')
-                                    ->required()
-                                    ->rows(3)
-                                    ->extraInputAttributes(['style' => 'font-family: monospace;']),
-                            ])
-                            ->collapsible()
-                            ->itemLabel(fn (array $state): ?string => $state['name'] ?? null)
-                            ->addActionLabel('Add File'),
+                            ->rows(18)
+                            ->columnSpanFull()
+                            ->placeholder("- hosts: all\n  become: true\n  tasks:\n    - import_tasks: tasks/check_device_type.yml")
+                            ->helperText('Reference shared tasks with: import_tasks: tasks/<name>')
+                            ->extraInputAttributes([
+                                'style' => 'font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.6; white-space: pre; overflow-x: auto;',
+                                'spellcheck' => 'false',
+                            ]),
                     ]),
             ]);
     }

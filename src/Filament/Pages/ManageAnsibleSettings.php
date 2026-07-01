@@ -3,27 +3,37 @@
 namespace VisioSoft\LaraAnsible\Filament\Pages;
 
 use Filament\Actions\Action;
+use Filament\Actions\Action as SchemaAction;
+use Filament\Actions\CreateAction;
+use Filament\Actions\DeleteAction;
+use Filament\Actions\EditAction;
 use Filament\Forms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Concerns\InteractsWithFormActions;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Components\Wizard;
-use Filament\Schemas\Components\Grid;
-use Filament\Schemas\Components\Actions;
-use Filament\Actions\Action as SchemaAction;
 use Filament\Schemas\Schema;
+use Filament\Tables;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Table;
+use Illuminate\Support\Str;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
+use VisioSoft\LaraAnsible\Models\Keystore;
 
-class ManageAnsibleSettings extends Page implements HasForms
+class ManageAnsibleSettings extends Page implements HasForms, HasTable
 {
     use InteractsWithFormActions;
     use InteractsWithForms;
+    use InteractsWithTable;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
 
@@ -43,9 +53,7 @@ class ManageAnsibleSettings extends Page implements HasForms
 
     public function mount(): void
     {
-        $setting = AnsibleSetting::getInstance();
-
-        $this->form->fill($setting->toArray());
+        $this->form->fill(AnsibleSetting::getInstance()->toArray());
     }
 
     public function form(Schema $schema): Schema
@@ -75,11 +83,6 @@ class ManageAnsibleSettings extends Page implements HasForms
                                         ->label('SSH User')
                                         ->prefixIcon('heroicon-o-user')
                                         ->disabled(),
-                                    Forms\Components\TextInput::make('ssh_private_key_path')
-                                        ->label('SSH Key Path')
-                                        ->prefixIcon('heroicon-o-key')
-                                        ->placeholder('~/.ssh/id_ed25519')
-                                        ->disabled(),
                                     Forms\Components\TextInput::make('child_hostname_column')
                                         ->label('IP/Hostname Column')
                                         ->prefixIcon('heroicon-o-globe-alt')
@@ -91,36 +94,6 @@ class ManageAnsibleSettings extends Page implements HasForms
                                         ->disabled(),
                                 ]),
 
-                            Grid::make(4)
-                                ->schema([
-                                    Forms\Components\TextInput::make('ssh_port')
-                                        ->label('SSH Port')
-                                        ->numeric(),
-                                    Forms\Components\TextInput::make('ssh_username')
-                                        ->label('SSH Username'),
-                                    Forms\Components\TextInput::make('ssh_private_key_path')
-                                        ->label('SSH Key Path')
-                                        ->placeholder('~/.ssh/id_ed25519'),
-                                    
-                                     Actions::make([
-                                        SchemaAction::make('save_changes')
-                                            ->label('Update SSH Settings')
-                                            ->icon('heroicon-o-check')
-                                            ->color('primary')
-                                            ->action(function (Get $get) use ($setting) {
-                                                $setting->update([
-                                                    'ssh_port' => $get('ssh_port'),
-                                                    'ssh_username' => $get('ssh_username'),
-                                                    'ssh_private_key_path' => $get('ssh_private_key_path'),
-                                                ]);
-                                                Notification::make()
-                                                    ->title('SSH Settings Updated')
-                                                    ->success()
-                                                    ->send();
-                                            }),
-                                    ])->alignEnd(),
-                                ]),
-                                
                             Actions::make([
                                 SchemaAction::make('reset_settings')
                                     ->label('Reset & Reconfigure')
@@ -138,7 +111,6 @@ class ManageAnsibleSettings extends Page implements HasForms
                                     }),
                             ]),
                         ]),
-
                 ])
                 ->statePath('data');
         }
@@ -251,18 +223,76 @@ class ManageAnsibleSettings extends Page implements HasForms
                                         ->default('root')
                                         ->placeholder('root')
                                         ->helperText('Default SSH username for all devices'),
-                                    Forms\Components\TextInput::make('ssh_private_key_path')
-                                        ->label('SSH Key Path')
-                                        ->default('~/.ssh/id_ed25519')
-                                        ->placeholder('~/.ssh/id_ed25519')
-                                        ->helperText('Default private key path for inventory scripts'),
                                 ])
-                                ->columns(4),
+                                ->columns(3),
                         ]),
                 ])
                     ->submitAction(null),
             ])
             ->statePath('data');
+    }
+
+    public function table(Table $table): Table
+    {
+        return $table
+            ->query(Keystore::query()->orderBy('name'))
+            ->heading('SSH Keys')
+            ->description('SSH private keys Ansible uses to connect to devices.')
+            ->columns([
+                Tables\Columns\TextColumn::make('name')
+                    ->label('Key Name')
+                    ->searchable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('private_key')
+                    ->label('Key')
+                    ->formatStateUsing(fn (?string $state): string => Str::limit(preg_replace('/\s+/', ' ', (string) $state), 50) ?: '—')
+                    ->color('gray'),
+                Tables\Columns\TextColumn::make('created_at')
+                    ->label('Added')
+                    ->dateTime('d.m.Y H:i')
+                    ->sortable(),
+            ])
+            ->headerActions([
+                CreateAction::make()
+                    ->label('Add SSH Key')
+                    ->modalHeading('Add SSH Key')
+                    ->schema($this->keystoreFormSchema()),
+            ])
+            ->actions([
+                EditAction::make()
+                    ->modalHeading('Edit SSH Key')
+                    ->schema($this->keystoreFormSchema()),
+                DeleteAction::make()
+                    ->before(function (Keystore $record, DeleteAction $action) {
+                        if ($record->inventories()->exists()) {
+                            Notification::make()
+                                ->warning()
+                                ->title('Key in use')
+                                ->body('This key is assigned to an inventory and cannot be deleted.')
+                                ->send();
+
+                            $action->cancel();
+                        }
+                    }),
+            ])
+            ->emptyStateHeading('No SSH keys yet')
+            ->emptyStateDescription('Add a key Ansible will use to connect to devices.')
+            ->emptyStateIcon('heroicon-o-key');
+    }
+
+    protected function keystoreFormSchema(): array
+    {
+        return [
+            Forms\Components\TextInput::make('name')
+                ->label('Key Name')
+                ->required()
+                ->placeholder('e.g. gate-prod'),
+            Forms\Components\Textarea::make('private_key')
+                ->label('Private Key (PEM)')
+                ->required()
+                ->rows(6)
+                ->placeholder('-----BEGIN OPENSSH PRIVATE KEY-----'),
+        ];
     }
 
     public function getFormActions(): array
@@ -278,10 +308,7 @@ class ManageAnsibleSettings extends Page implements HasForms
 
     public function save(): void
     {
-        $data = $this->form->getState();
-
-        $setting = AnsibleSetting::getInstance();
-        $setting->update($data);
+        AnsibleSetting::getInstance()->update($this->form->getState());
 
         Notification::make()
             ->title('Settings Saved')

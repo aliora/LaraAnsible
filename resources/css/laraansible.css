@@ -28,3 +28,23 @@
 .laraansible-hosts-checkbox-list.fi-fo-checkbox-list .fi-fo-checkbox-list-options.fi-grid-direction-col .fi-fo-checkbox-list-option-ctn {
     padding-top: 0.5rem;
 }
+
+/* Full-width Ansible forms: stretch the content/form containers on pages that
+   render the marked form (scoped via :has so other resources are untouched). */
+.fi-main:has(.laraansible-full-form),
+.fi-main:has(.laraansible-full-form) .fi-page-content,
+.fi-main:has(.laraansible-full-form) .fi-form,
+.fi-main:has(.laraansible-full-form) form {
+    max-width: 100% !important;
+    width: 100% !important;
+}
+
+/* Tasks column: wrap badges onto multiple lines instead of overflowing. */
+.laraansible-tasks-badges {
+    white-space: normal !important;
+}
+
+.laraansible-tasks-badges > * {
+    flex-wrap: wrap !important;
+    row-gap: 0.25rem !important;
+}

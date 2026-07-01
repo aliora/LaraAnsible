@@ -8,4 +8,6 @@
             @endforeach
         </div>
     </form>
+
+    {{ $this->table }}
 </x-filament-panels::page>

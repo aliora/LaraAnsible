@@ -199,6 +199,7 @@ class ListInventories extends ListRecords
                                     })
                                     ->bulkToggleable()
                                     ->columns(1)
+                                    ->in(fn (): array => DB::table($setting->child_table)->pluck('id')->all())
                                     ->required(),
                             ])
                             ->columnSpanFull()
@@ -268,7 +269,7 @@ class ListInventories extends ListRecords
                                 $alias = 'host_'.$child->id;
                             }
                             // Keep spaces and other Ansible-compatible chars, only replace special chars
-                            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', $alias);
+                            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', Inventory::transliterate($alias));
 
                             $finalAlias = $alias;
                             $suffix = 2;
@@ -342,6 +343,12 @@ class ListInventories extends ListRecords
                         $imported = count($hostsEntry);
                     } catch (\Exception $e) {
                         \Log::error('Failed to import inventory: '.$e->getMessage());
+
+                        Notification::make()
+                            ->danger()
+                            ->title('Import failed')
+                            ->body($e->getMessage())
+                            ->send();
 
                         return;
                     }

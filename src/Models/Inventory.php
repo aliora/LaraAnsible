@@ -5,6 +5,8 @@ namespace VisioSoft\LaraAnsible\Models;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
+use Modules\Parking\Models\Park;
 
 class Inventory extends Model
 {
@@ -175,6 +177,24 @@ class Inventory extends Model
     }
 
     /**
+     * Turkish-aware ASCII transliteration (ü→u, ö→o, ç→c, ş→s, ğ→g, ı→i).
+     */
+    public static function transliterate(?string $value): string
+    {
+        return Str::ascii((string) $value, 'tr');
+    }
+
+    /**
+     * Transliterate then reduce to a clean Ansible group token (single underscores).
+     */
+    public static function ansibleGroupName(?string $value): string
+    {
+        $slug = preg_replace('/[^a-zA-Z0-9_]+/', '_', self::transliterate($value));
+
+        return trim((string) $slug, '_') ?: 'hosts';
+    }
+
+    /**
      * Build inventory script content for host entries and connection details.
      */
     public static function buildInventoryScript(
@@ -185,7 +205,7 @@ class Inventory extends Model
         ?int $sshPort = null
     ): string {
         $groupName = $groupName ?: 'hosts';
-        $sanitizedGroupName = preg_replace('/[^a-zA-Z0-9_]/', '_', $groupName);
+        $sanitizedGroupName = self::ansibleGroupName($groupName);
 
         $lines = [];
         $lines[] = "[{$sanitizedGroupName}]";
@@ -194,7 +214,7 @@ class Inventory extends Model
         foreach ($hosts as $name => $ip) {
             // Keep the original hostname but replace only Ansible-incompatible special chars
             // Allow spaces, letters, numbers, dots, hyphens, underscores
-            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', trim((string) $name));
+            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', self::transliterate(trim((string) $name)));
             $hostIp = trim((string) $ip);
 
             if ($alias === '' || $hostIp === '') {
@@ -283,7 +303,7 @@ class Inventory extends Model
 
     public function park(): BelongsTo
     {
-        return $this->belongsTo(\App\Models\Park::class);
+        return $this->belongsTo(Park::class);
     }
 
     public static function parseInventoryScript(?string $script): array

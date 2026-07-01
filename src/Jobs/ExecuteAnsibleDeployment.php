@@ -38,10 +38,15 @@ class ExecuteAnsibleDeployment implements ShouldQueue
      */
     public function failed(\Throwable $exception): void
     {
+        $this->deployment->appendLog("\n\n=== ERROR ===\n".$exception->getMessage()."\n");
         $this->deployment->update([
             'status' => 'failed',
-            'command_output' => $exception->getMessage(),
             'completed_at' => now(),
         ]);
+
+        // Remove any leftover run artifacts from the failed deployment.
+        app(AnsibleService::class)->cleanup(
+            storage_path('app/ansible/runs/'.$this->deployment->id)
+        );
     }
 }

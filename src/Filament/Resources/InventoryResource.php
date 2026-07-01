@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
+use VisioSoft\LaraAnsible\Helpers\JobLauncher;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Inventory;
 use VisioSoft\LaraAnsible\Services\DeploymentService;
@@ -216,42 +217,12 @@ class InventoryResource extends Resource
             ])
             ->headerActions([])
             ->actions([
-                Actions\Action::make('quick_run')
-                    ->label(label: 'Run')
-                    ->icon('heroicon-o-play')
-                    ->color('success')
-                    ->button()
-                    ->modalHeading('Run Task')
-                    ->modalDescription(fn (Inventory $record): string => "Run task on '{$record->name}'")
-                    ->form([
-                        FormSchemaHelper::taskTemplateSelect(),
-                    ])
-                    ->action(function (Inventory $record, array $data): void {
-                        app(DeploymentService::class)->createWithInventoryIds(
-                            [$record->id],
-                            $data['task_template_id']
-                        );
-                    }),
+                JobLauncher::rowAction('quick_run'),
                 Actions\EditAction::make()
                     ->button(),
             ])
             ->bulkActions([
-                Actions\BulkAction::make('quick_run')
-                    ->label(label: 'Run')
-                    ->icon('heroicon-o-play')
-                    ->color('success')
-                    ->modalHeading('Bulk Run Task')
-                    ->modalDescription(fn (Collection $records): string => $records->count().' hosts selected')
-                    ->form([
-                        FormSchemaHelper::taskTemplateSelect(),
-                    ])
-                    ->action(function (Collection $records, array $data): void {
-                        app(DeploymentService::class)->createWithInventoryIds(
-                            $records->pluck('id')->toArray(),
-                            $data['task_template_id']
-                        );
-                    })
-                    ->deselectRecordsAfterCompletion(),
+                JobLauncher::bulkAction('quick_run'),
                 Actions\DeleteBulkAction::make(),
             ]);
     }

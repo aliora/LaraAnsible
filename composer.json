@@ -2,7 +2,7 @@
     "$schema": "https://getcomposer.org/schema.json",
     "name": "visio/laraansible",
     "type": "library",
-    "description": "A FilamentPHP 3 plugin for managing Ansible inventories, task templates, and deployments.",
+    "description": "A FilamentPHP plugin for managing Ansible inventories, task templates, and deployments.",
     "keywords": [
         "laravel",
         "filament",
@@ -19,8 +19,8 @@
     ],
     "require": {
         "php": "^8.2",
-        "filament/filament": "^3.0|^4.0",
-        "laravel/framework": "^11.0|^12.0",
+        "filament/filament": "^4.0|^5.0",
+        "laravel/framework": "^11.0|^12.0|^13.0",
         "laravel/horizon": "^5.40"
     },
     "require-dev": {

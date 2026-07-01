@@ -8,11 +8,13 @@ use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
+use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\HtmlString;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
 use VisioSoft\LaraAnsible\Models\Deployment;
+use VisioSoft\LaraAnsible\Models\Inventory;
 use VisioSoft\LaraAnsible\Services\DeploymentService;
 
 class OnGoingTasksPage extends Page implements HasTable
@@ -59,7 +61,7 @@ class OnGoingTasksPage extends Page implements HasTable
                         if (empty($inventoryIds)) {
                             return 0;
                         }
-                        $inventories = \VisioSoft\LaraAnsible\Models\Inventory::whereIn('id', $inventoryIds)->get();
+                        $inventories = Inventory::whereIn('id', $inventoryIds)->get();
                         $totalHosts = 0;
                         foreach ($inventories as $inventory) {
                             if (! empty($inventory->script)) {
@@ -78,22 +80,23 @@ class OnGoingTasksPage extends Page implements HasTable
                 Tables\Columns\ViewColumn::make('progress')
                     ->label('Progress')
                     ->view('laraansible::filament.columns.progress-bar'),
-                Tables\Columns\BadgeColumn::make('status')
+                Tables\Columns\TextColumn::make('status')
                     ->label('Status')
-                    ->colors([
-                        'gray' => 'pending',
+                    ->badge()
+                    ->color(fn (string $state): string => match ($state) {
                         'warning' => 'warning',
-                        'info' => 'running',
+                        'running' => 'info',
                         'success' => 'success',
-                        'danger' => 'failed',
-                    ])
-                    ->icons([
-                        'heroicon-o-clock' => 'pending',
-                        'heroicon-o-exclamation-triangle' => 'warning',
-                        'heroicon-o-arrow-path' => 'running',
-                        'heroicon-o-check-circle' => 'success',
-                        'heroicon-o-x-circle' => 'failed',
-                    ])
+                        'failed' => 'danger',
+                        default => 'gray',
+                    })
+                    ->icon(fn (string $state): string => match ($state) {
+                        'warning' => 'heroicon-o-exclamation-triangle',
+                        'running' => 'heroicon-o-arrow-path',
+                        'success' => 'heroicon-o-check-circle',
+                        'failed' => 'heroicon-o-x-circle',
+                        default => 'heroicon-o-clock',
+                    })
                     ->formatStateUsing(fn (string $state): string => match ($state) {
                         'pending' => 'Pending',
                         'warning' => 'Warning',
@@ -105,10 +108,18 @@ class OnGoingTasksPage extends Page implements HasTable
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Started By')
                     ->placeholder('-'),
+                Tables\Columns\TextColumn::make('log_id')
+                    ->label('Log ID')
+                    ->badge()
+                    ->color('gray')
+                    ->copyable()
+                    ->copyMessage('Log ID copied')
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('started_at')
                     ->label('Started At')
                     ->dateTime('d.m.Y H:i:s')
-                    ->description(fn (Deployment $record): ?string => $record->completed_at ? 'Ended: ' . $record->completed_at->format('d.m.Y H:i:s') : null)
+                    ->description(fn (Deployment $record): ?string => $record->completed_at ? 'Ended: '.$record->completed_at->format('d.m.Y H:i:s') : null)
                     ->sortable(),
             ])
             ->filters([
@@ -123,38 +134,57 @@ class OnGoingTasksPage extends Page implements HasTable
                     ]),
             ])
             ->actions([
-                Actions\Action::make('watch_terminal')
-                    ->label('Logs')
-                    ->icon('heroicon-o-computer-desktop')
-                    ->color('info')
-                    ->button()
-                    ->modalHeading(fn (Deployment $record): string => "Terminal: {$record->taskTemplate?->name}")
-                    ->modalContent(function (Deployment $record): HtmlString {
-                        return new HtmlString(Blade::render(
-                            '<livewire:terminal-viewer :deployment-id="$id" />',
-                            ['id' => $record->id]
-                        ));
-                    })
-                    ->modalWidth('4xl')
-                    ->modalSubmitAction(false)
-                    ->modalCancelActionLabel('Close'),
-                Actions\Action::make('repeat_job')
-                    ->label(' ')
-                    ->icon('heroicon-o-arrow-path')
-                    ->color('warning')
-                    ->button()
-                    ->requiresConfirmation()
-                    ->modalHeading('Repeat Job')
-                    ->modalDescription(fn (Deployment $record): string => "Do you want to repeat the job '{$record->taskTemplate?->name}' with the same configuration?")
-                    ->modalSubmitActionLabel('Yes, Repeat')
-                    ->action(function (Deployment $record): void {
-                        app(DeploymentService::class)->createWithInventoryIds(
-                            $record->inventory_ids ?? [],
-                            $record->task_template_id
-                        );
-                    })
-                    ->successNotificationTitle('Job repeated successfully'),
-            ])
+                // All row operations grouped under an "İşlemler" dropdown button.
+                Actions\ActionGroup::make([
+                    Actions\Action::make('watch_terminal')
+                        ->label('Logs')
+                        ->icon('heroicon-o-computer-desktop')
+                        ->color('info')
+                        ->modalHeading(fn (Deployment $record): string => "Terminal: {$record->taskTemplate?->name}")
+                        ->modalContent(function (Deployment $record): HtmlString {
+                            return new HtmlString(Blade::render(
+                                '<livewire:terminal-viewer :deployment-id="$id" />',
+                                ['id' => $record->id]
+                            ));
+                        })
+                        ->modalWidth('4xl')
+                        ->modalSubmitAction(false)
+                        ->modalCancelActionLabel('Close'),
+                    Actions\Action::make('repeat_job')
+                        ->label('Repeat')
+                        ->icon('heroicon-o-arrow-path')
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->modalHeading('Repeat Job')
+                        ->modalDescription(fn (Deployment $record): string => "Do you want to repeat the job '{$record->taskTemplate?->name}' with the same configuration?")
+                        ->modalSubmitActionLabel('Yes, Repeat')
+                        ->action(function (Deployment $record): void {
+                            app(DeploymentService::class)->createWithInventoryIds(
+                                $record->inventory_ids ?? [],
+                                $record->task_template_id,
+                                extraVars: $record->extra_vars ?? [],
+                            );
+                        })
+                        ->successNotificationTitle('Job repeated successfully'),
+                    Actions\Action::make('cancel_job')
+                        ->label('Stop')
+                        ->icon('heroicon-o-stop-circle')
+                        ->color('danger')
+                        ->visible(fn (Deployment $record): bool => in_array($record->status, ['running', 'pending'], true))
+                        ->requiresConfirmation()
+                        ->modalHeading('Stop Job')
+                        ->modalDescription(fn (Deployment $record): string => "Stop the running job '{$record->taskTemplate?->name}'? This kills its ansible process on the controller.")
+                        ->modalSubmitActionLabel('Yes, Stop')
+                        ->action(function (Deployment $record): void {
+                            app(DeploymentService::class)->cancel($record);
+                        })
+                        ->successNotificationTitle('Job stopped'),
+                ])
+                    ->label('İşlemler')
+                    ->icon('heroicon-m-ellipsis-vertical')
+                    ->color('primary')
+                    ->button(),
+            ], RecordActionsPosition::BeforeColumns)
             ->headerActions([
                 Actions\Action::make('create_new_job')
                     ->label('New Job')
@@ -164,17 +194,18 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->form([
                         Forms\Components\Select::make('inventory_ids')
                             ->label('Target Hosts')
-                            ->options(\VisioSoft\LaraAnsible\Models\Inventory::pluck('name', 'id'))
+                            ->options(Inventory::pluck('name', 'id'))
                             ->multiple()
                             ->searchable()
                             ->preload()
                             ->required(),
-                        FormSchemaHelper::taskTemplateSelect(),
+                        ...FormSchemaHelper::jobInputsSchema(),
                     ])
                     ->action(function (array $data): void {
                         app(DeploymentService::class)->createWithInventoryIds(
                             $data['inventory_ids'],
-                            $data['task_template_id']
+                            (int) $data['task_template_id'],
+                            extraVars: FormSchemaHelper::collectInputVars($data),
                         );
                     }),
             ])

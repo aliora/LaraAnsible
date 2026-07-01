@@ -23,6 +23,12 @@ class Keystore extends Model
         'password',
     ];
 
+    protected $casts = [
+        'private_key' => 'encrypted',
+        'passphrase' => 'encrypted',
+        'password' => 'encrypted',
+    ];
+
     public function inventories(): HasMany
     {
         return $this->hasMany(Inventory::class);

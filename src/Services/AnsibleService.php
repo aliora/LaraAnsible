@@ -2,6 +2,7 @@
 
 namespace VisioSoft\LaraAnsible\Services;
 
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
@@ -12,6 +13,28 @@ use VisioSoft\LaraAnsible\Models\Keystore;
 class AnsibleService
 {
     /**
+     * Absolute path to the current deployment's isolated run directory.
+     */
+    protected string $runDir = '';
+
+    /**
+     * Build (and ensure) the isolated run directory for a deployment.
+     *
+     * All artifacts for a single run live under this one directory:
+     * inventory.ini, playbook.yml, tasks/, templates/, keys/. The whole
+     * directory is removed as a unit once the run finishes.
+     */
+    protected function runDir(Deployment $deployment): string
+    {
+        $dir = storage_path('app/ansible/runs/'.$deployment->id);
+        if (! is_dir($dir)) {
+            mkdir($dir, 0700, true);
+        }
+
+        return $dir;
+    }
+
+    /**
      * Execute an Ansible deployment
      */
     public function executeDeployment(Deployment $deployment): void
@@ -20,6 +43,8 @@ class AnsibleService
             'status' => 'running',
             'started_at' => now(),
         ]);
+
+        $this->runDir = $this->runDir($deployment);
 
         try {
             Log::info("Starting deployment {$deployment->id}");
@@ -37,6 +62,9 @@ class AnsibleService
             $this->createTemplateFiles($deployment, $playbookPath);
             Log::info('Created template files');
 
+            // Copy the shared file library (tasks/templates a job can reference)
+            $this->createSharedLibraryFiles($playbookPath);
+
             // Build ansible-playbook command
             $commandData = $this->buildAnsibleCommand($deployment, $inventoryPath, $playbookPath);
             Log::info("Command to execute: {$commandData['display_command']}");
@@ -53,6 +81,9 @@ class AnsibleService
             $commandInput .= file_get_contents($inventoryPath)."\n\n";
             $commandInput .= "=== Playbook File ({$playbookPath}) ===\n";
             $commandInput .= file_get_contents($playbookPath);
+
+            // Logs live in a file (storage/logs/ansible-playbook/<id>.log), not the DB.
+            $deployment->writeLog($commandInput."\n\n=== Ansible Output ===\n");
 
             $deployment->update([
                 'command_input' => $commandInput,
@@ -74,6 +105,9 @@ class AnsibleService
                 ])
                 ->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, &$completedTasks, $totalTasks, $deployment) {
                     $outputBuffer .= $output;
+
+                    // Stream this chunk straight to the log file (no DB output bloat).
+                    $deployment->appendLog($output);
 
                     // Parse Ansible output to track progress
 
@@ -99,9 +133,8 @@ class AnsibleService
                         $processedTasks = $totalTasks;
                     }
 
-                    // Update deployment with partial output and progress for real-time viewing
+                    // Update deployment with progress only (output goes to the log file).
                     $deployment->update([
-                        'command_output' => $outputBuffer,
                         'progress' => $progress,
                         'processed_hosts' => $processedTasks,
                     ]);
@@ -109,11 +142,10 @@ class AnsibleService
 
             Log::info("Command executed with exit code: {$result->exitCode()}");
 
-            // Final update with complete output and status
+            // Final status update (full output already streamed to the log file).
             $finalOutput = $result->output();
             $deployment->update([
                 'status' => $this->resolveDeploymentStatus($finalOutput, $result->exitCode()),
-                'command_output' => $finalOutput,
                 'exit_code' => $result->exitCode(),
                 'completed_at' => now(),
                 'progress' => 100, // Ensure it's 100 on completion
@@ -126,23 +158,23 @@ class AnsibleService
                 ]);
             }
 
-            // Clean up temporary files
-            $this->cleanup($inventoryPath, $playbookPath);
             Log::info("Deployment {$deployment->id} completed");
-
         } catch (\Exception $e) {
             Log::error("Deployment {$deployment->id} exception: {$e->getMessage()}", [
                 'exception' => $e,
                 'trace' => $e->getTraceAsString(),
             ]);
 
+            $deployment->appendLog("\n\n=== ERROR ===\n".$e->getMessage()."\n");
             $deployment->update([
                 'status' => 'failed',
-                'command_output' => $e->getMessage(),
                 'completed_at' => now(),
             ]);
 
             throw $e;
+        } finally {
+            // Always remove the whole run directory — success, failure, or exception.
+            $this->cleanup($this->runDir);
         }
     }
 
@@ -274,8 +306,8 @@ class AnsibleService
                             $parent = \DB::table($setting->parent_table)->find($parentId);
                             $groupName = $parent ? ($parent->{$setting->parent_label_column ?? 'name'} ?? 'unknown') : 'unknown';
 
-                            // Sanitize group name for Ansible
-                            $groupName = preg_replace('/[^a-zA-Z0-9_]/', '_', strtolower($groupName));
+                            // Sanitize group name for Ansible (Turkish-aware)
+                            $groupName = strtolower(Inventory::ansibleGroupName($groupName));
 
                             if (! isset($groupedInventories[$groupName])) {
                                 $groupedInventories[$groupName] = [];
@@ -475,11 +507,7 @@ class AnsibleService
             $content = $gateServerContent.$allGroupContent.$content;
         }
 
-        $path = storage_path('app/ansible/inventory_'.$deployment->id.'.ini');
-        $dir = dirname($path);
-        if (! is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
+        $path = $this->runDir.'/inventory.ini';
         file_put_contents($path, $content);
 
         // Debug: Log inventory content
@@ -604,11 +632,7 @@ class AnsibleService
             throw new \Exception('No playbook content or valid playbook path found');
         }
 
-        $path = storage_path('app/ansible/playbook_'.$deployment->id.'.yml');
-        $dir = dirname($path);
-        if (! is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
+        $path = $this->runDir.'/playbook.yml';
         file_put_contents($path, $content);
 
         return $path;
@@ -633,8 +657,61 @@ class AnsibleService
         }
 
         foreach ($templates as $template) {
-            $path = $templatesDir.'/'.$template['name'];
+            $path = $templatesDir.'/'.basename($template['name']);
             file_put_contents($path, $template['content']);
+        }
+    }
+
+    /**
+     * Copy the shared file library into the run directory so any job can reference
+     * common tasks/templates without re-declaring them. Drop files in
+     * storage/app/ansible/library/ and route them by extension:
+     *   - .yml / .yaml -> tasks/<name> (+ flat root)   (import_tasks: tasks/<name> | <name>)
+     *   - anything else -> templates/<name> + files/<name> (+ flat root)
+     *                                                  (template/copy: src=templates|files/<name> | <name>)
+     */
+    protected function createSharedLibraryFiles(string $playbookPath): void
+    {
+        $libraryDir = storage_path('app/ansible/library');
+
+        if (! is_dir($libraryDir)) {
+            return;
+        }
+
+        $files = glob($libraryDir.'/*');
+        if (empty($files)) {
+            return;
+        }
+
+        $base = dirname($playbookPath);
+        $reserved = ['playbook.yml', 'inventory.ini'];
+
+        foreach (['tasks', 'templates', 'files'] as $dir) {
+            if (! is_dir($base.'/'.$dir)) {
+                mkdir($base.'/'.$dir, 0755, true);
+            }
+        }
+
+        foreach ($files as $file) {
+            if (! is_file($file)) {
+                continue;
+            }
+
+            $name = basename($file);
+            $content = file_get_contents($file);
+            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+
+            // Flat copy at the run root so a bare (prefix-less) reference resolves too.
+            if (! in_array($name, $reserved, true)) {
+                file_put_contents($base.'/'.$name, $content);
+            }
+
+            if (in_array($ext, ['yml', 'yaml'], true)) {
+                file_put_contents($base.'/tasks/'.$name, $content);
+            } else {
+                file_put_contents($base.'/templates/'.$name, $content);
+                file_put_contents($base.'/files/'.$name, $content);
+            }
         }
     }
 
@@ -643,7 +720,7 @@ class AnsibleService
      */
     protected function createTempKeyFile(Keystore $keystore): string
     {
-        $path = storage_path('app/ansible/keys/key_'.$keystore->id);
+        $path = $this->runDir.'/keys/key_'.$keystore->id;
         $dir = dirname($path);
         if (! is_dir($dir)) {
             mkdir($dir, 0700, true);
@@ -657,15 +734,32 @@ class AnsibleService
     /**
      * Build Ansible command
      */
+    /**
+     * Merge the job's default extra_vars with the per-run values collected at launch.
+     * Per-run values (from the launch button) win over task-template defaults.
+     */
+    protected function resolveExtraVars(Deployment $deployment): array
+    {
+        $vars = $deployment->taskTemplate->extra_vars ?? [];
+        $vars = is_array($vars) ? $vars : [];
+
+        $runVars = $deployment->extra_vars ?? [];
+        if (is_array($runVars)) {
+            $vars = array_merge($vars, $runVars);
+        }
+
+        return $vars;
+    }
+
     protected function buildAnsibleCommand(Deployment $deployment, string $inventoryPath, string $playbookPath): array
     {
         // Build base ansible-playbook command with correct order
         $command = "ansible-playbook -i {$inventoryPath} {$playbookPath}";
 
-        // Add extra vars from task template
-        if ($deployment->taskTemplate->extra_vars) {
-            $extraVars = json_encode($deployment->taskTemplate->extra_vars);
-            $command .= ' --extra-vars '.escapeshellarg($extraVars);
+        // Add extra vars: task-template defaults overridden by per-run (launch button) values
+        $extraVars = $this->resolveExtraVars($deployment);
+        if (! empty($extraVars)) {
+            $command .= ' --extra-vars '.escapeshellarg(json_encode($extraVars));
         }
 
         // Add CLI flags from checkboxes
@@ -726,9 +820,9 @@ class AnsibleService
 
         // Add extra vars/args if needed to ensure valid execution context, but --list-tasks might skip them.
         // However, if variables are required for task conditional inclusion, we might need them.
-        if ($deployment->taskTemplate->extra_vars) {
-            $extraVars = json_encode($deployment->taskTemplate->extra_vars);
-            $command .= ' --extra-vars '.escapeshellarg($extraVars);
+        $extraVars = $this->resolveExtraVars($deployment);
+        if (! empty($extraVars)) {
+            $command .= ' --extra-vars '.escapeshellarg(json_encode($extraVars));
         }
 
         // Add limit hosts
@@ -983,30 +1077,25 @@ class AnsibleService
     }
 
     /**
-     * Clean up temporary files
+     * Remove a deployment's entire run directory in one shot
+     * (inventory.ini, playbook.yml, tasks/, templates/, keys/).
+     *
+     * Safe to call multiple times and confined to the ansible runs root
+     * so it can never delete an unrelated path.
      */
-    protected function cleanup(string $inventoryPath, string $playbookPath): void
+    public function cleanup(string $runDir): void
     {
-        if (file_exists($inventoryPath)) {
-            unlink($inventoryPath);
+        if ($runDir === '' || ! is_dir($runDir)) {
+            return;
         }
 
-        if (file_exists($playbookPath)) {
-            $playbookDir = dirname($playbookPath);
-            $templatesDir = $playbookDir.'/templates';
+        $runsRoot = storage_path('app/ansible/runs');
+        if (! str_starts_with($runDir, $runsRoot)) {
+            Log::warning("Refusing to clean up path outside runs dir: {$runDir}");
 
-            // Clean up templates if they exist
-            if (is_dir($templatesDir)) {
-                $files = glob($templatesDir.'/*');
-                foreach ($files as $file) {
-                    if (is_file($file)) {
-                        unlink($file);
-                    }
-                }
-                rmdir($templatesDir);
-            }
-
-            unlink($playbookPath);
+            return;
         }
+
+        File::deleteDirectory($runDir);
     }
 }
