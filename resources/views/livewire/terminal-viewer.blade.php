@@ -1,7 +1,7 @@
 <div @if(! $isFinished) wire:poll.2s @endif class="bg-gray-900 rounded-lg p-4">
     <div class="flex justify-between items-center mb-2 border-b border-gray-700 pb-2">
-        <span class="text-xs font-mono text-gray-400">Durum: {{ $status }}</span>
-        <span class="text-xs font-mono text-gray-500">Son Güncelleme: {{ now()->format('H:i:s') }}</span>
+        <span class="text-xs font-mono text-gray-400">{{ __('laraansible::laraansible.status') }}: {{ $status }}</span>
+        <span class="text-xs font-mono text-gray-500">{{ __('laraansible::laraansible.last_update') }}: {{ now()->format('H:i:s') }}</span>
     </div>
 
     {{-- Fixed-height, scrollable log area: the modal stays put, only this div scrolls. --}}

@@ -13,103 +13,102 @@ use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Illuminate\Support\Facades\Storage;
+use VisioSoft\LaraAnsible\Filament\Concerns\AuthorizesAnsibleAccess;
+use VisioSoft\LaraAnsible\Helpers\AnsibleImporter;
+use VisioSoft\LaraAnsible\Helpers\TableHelper;
 use VisioSoft\LaraAnsible\Models\TaskTemplate;
 
 class Jobs extends Page implements HasTable
 {
+    use AuthorizesAnsibleAccess;
     use InteractsWithTable;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-list';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
-
     protected static ?int $navigationSort = 2;
-
-    protected static ?string $navigationLabel = 'Job Templates';
-
-    protected static ?string $title = 'Job Templates';
 
     protected static ?string $slug = 'ansible/jobs';
 
     protected string $view = 'laraansible::pages.jobs';
 
+    public static function getNavigationGroup(): ?string
+    {
+        return __('laraansible::laraansible.nav_group');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('laraansible::laraansible.job_templates');
+    }
+
+    public function getTitle(): string
+    {
+        return __('laraansible::laraansible.job_templates');
+    }
+
     public function table(Table $table): Table
     {
-        return $table
+        return TableHelper::configure($table)
             ->query(TaskTemplate::query()->orderBy('name'))
-            ->heading('Job Templates')
-            ->description('Ansible playbooks. Each job is a complete, self-contained playbook — write all tasks inline (inline file contents with copy: content=... when needed).')
+            ->heading(__('laraansible::laraansible.job_templates'))
+            ->description(__('laraansible::laraansible.jobs_table_description'))
             ->columns([
                 Tables\Columns\TextColumn::make('name')
-                    ->label('Name')
+                    ->label(__('laraansible::laraansible.name'))
                     ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('deployments_count')
                     ->counts('deployments')
-                    ->label('Runs')
+                    ->label(__('laraansible::laraansible.runs'))
                     ->sortable(),
                 Tables\Columns\IconColumn::make('is_active')
-                    ->label('Active')
+                    ->label(__('laraansible::laraansible.active'))
                     ->boolean(),
                 Tables\Columns\TextColumn::make('updated_at')
-                    ->label('Updated')
+                    ->label(__('laraansible::laraansible.updated'))
                     ->dateTime('d.m.Y H:i')
                     ->sortable(),
             ])
             ->headerActions([
                 Action::make('import')
-                    ->label('Import Playbooks')
+                    ->label(__('laraansible::laraansible.import'))
                     ->icon('heroicon-o-arrow-up-tray')
                     ->color('gray')
-                    ->modalHeading('Bulk Import Job Templates')
-                    ->modalDescription('Upload one or more playbook files. Each file becomes a job template (filename = name).')
+                    ->modalHeading(__('laraansible::laraansible.bulk_import_heading'))
+                    ->modalDescription(__('laraansible::laraansible.jobs_bulk_import_description'))
                     ->schema([
                         Forms\Components\FileUpload::make('files')
-                            ->label('Playbook Files')
+                            ->label(__('laraansible::laraansible.ansible_files'))
                             ->multiple()
                             ->required()
                             ->preserveFilenames()
                             ->storeFiles(true)
                             ->disk('local')
-                            ->directory('ansible-playbook-imports')
-                            ->helperText('e.g. install-all.yml, git-pull.yml'),
+                            ->directory('ansible-imports')
+                            ->helperText(__('laraansible::laraansible.jobs_ansible_files_help')),
                     ])
                     ->action(function (array $data): void {
-                        $count = 0;
-
-                        foreach ($data['files'] ?? [] as $path) {
-                            if (! Storage::disk('local')->exists($path)) {
-                                continue;
-                            }
-
-                            TaskTemplate::updateOrCreate(
-                                ['name' => pathinfo(basename($path), PATHINFO_FILENAME)],
-                                ['playbook_content' => Storage::disk('local')->get($path), 'is_active' => true],
-                            );
-
-                            Storage::disk('local')->delete($path);
-                            $count++;
-                        }
+                        $counts = AnsibleImporter::import($data['files'] ?? []);
 
                         Notification::make()
                             ->success()
-                            ->title("Imported {$count} job template(s)")
+                            ->title(AnsibleImporter::summarize($counts))
                             ->send();
                     }),
                 CreateAction::make()
-                    ->label('Add Job')
-                    ->modalHeading('Add Job Template')
+                    ->label(__('laraansible::laraansible.add_job'))
+                    ->modalHeading(__('laraansible::laraansible.add_job_template'))
                     ->schema($this->jobFormSchema()),
             ])
-            ->actions([
+            ->actions(TableHelper::actionGroup([
                 EditAction::make()
-                    ->modalHeading('Edit Job Template')
+                    ->modalHeading(__('laraansible::laraansible.edit_job_template'))
                     ->schema($this->jobFormSchema()),
                 DeleteAction::make(),
-            ])
-            ->emptyStateHeading('No job templates yet')
-            ->emptyStateDescription('Add a playbook or import files.')
+            ]))
+            ->bulkActions(TableHelper::bulkActions())
+            ->emptyStateHeading(__('laraansible::laraansible.no_job_templates'))
+            ->emptyStateDescription(__('laraansible::laraansible.no_job_templates_description'))
             ->emptyStateIcon('heroicon-o-clipboard-document-list');
     }
 
@@ -117,40 +116,40 @@ class Jobs extends Page implements HasTable
     {
         return [
             Forms\Components\TextInput::make('name')
-                ->label('Name')
+                ->label(__('laraansible::laraansible.name'))
                 ->required()
                 ->maxLength(255)
-                ->placeholder('e.g. Install Gate')
+                ->placeholder(__('laraansible::laraansible.template_name_placeholder'))
                 ->columnSpanFull(),
             Forms\Components\Toggle::make('is_active')
-                ->label('Active')
+                ->label(__('laraansible::laraansible.active'))
                 ->default(true),
             Forms\Components\Textarea::make('playbook_content')
-                ->label('Playbook YAML')
+                ->label(__('laraansible::laraansible.playbook_yaml'))
                 ->required()
                 ->rows(18)
                 ->columnSpanFull()
                 ->placeholder("- hosts: all\n  become: true\n  tasks:\n    - name: Example\n      ansible.builtin.debug:\n        msg: hello {{ my_var | default('world') }}")
-                ->helperText('Write a complete, self-contained playbook. Reference run-time inputs as {{ variable }} — values are passed in when the job is launched.')
+                ->helperText(__('laraansible::laraansible.jobs_playbook_help'))
                 ->extraInputAttributes([
                     'style' => 'font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.6; white-space: pre; overflow-x: auto;',
                     'spellcheck' => 'false',
                 ]),
             Forms\Components\Repeater::make('input_vars')
-                ->label('Input Variables')
-                ->helperText('Asked when the job is launched, passed to the playbook as --extra-vars ({{ name }}).')
+                ->label(__('laraansible::laraansible.input_variables'))
+                ->helperText(__('laraansible::laraansible.input_variables_help'))
                 ->columnSpanFull()
                 ->hintAction(
                     Action::make('detect_inputs')
-                        ->label('Detect from playbook')
+                        ->label(__('laraansible::laraansible.detect_from_playbook'))
                         ->icon('heroicon-o-sparkles')
                         ->action(function ($get, $set): void {
-                            $detected = self::detectInputVars((string) $get('playbook_content'));
+                            $detected = AnsibleImporter::detectInputVars((string) $get('playbook_content'));
 
                             if (empty($detected)) {
                                 Notification::make()
                                     ->warning()
-                                    ->title('No vars_prompt found in the playbook')
+                                    ->title(__('laraansible::laraansible.no_vars_prompt_found'))
                                     ->send();
 
                                 return;
@@ -160,84 +159,37 @@ class Jobs extends Page implements HasTable
 
                             Notification::make()
                                 ->success()
-                                ->title(count($detected).' input(s) detected')
-                                ->body('Set the type and, for selects, the choices.')
+                                ->title(__('laraansible::laraansible.inputs_detected', ['count' => count($detected)]))
+                                ->body(__('laraansible::laraansible.inputs_detected_body'))
                                 ->send();
                         })
                 )
                 ->schema([
                     Forms\Components\TextInput::make('name')
-                        ->label('Variable')
+                        ->label(__('laraansible::laraansible.variable'))
                         ->required()
-                        ->helperText('Referenced as {{ name }} in the playbook'),
+                        ->helperText(__('laraansible::laraansible.variable_help')),
                     Forms\Components\TextInput::make('label')
-                        ->label('Label')
+                        ->label(__('laraansible::laraansible.label'))
                         ->required(),
                     Forms\Components\TextInput::make('default')
-                        ->label('Default')
-                        ->helperText('Optional: one of the choice values, preselected'),
+                        ->label(__('laraansible::laraansible.default'))
+                        ->helperText(__('laraansible::laraansible.default_help')),
                     Forms\Components\KeyValue::make('options')
-                        ->label('Choices (value → label)')
-                        ->keyLabel('Value (sent to ansible)')
-                        ->valueLabel('Label (shown to user)')
+                        ->label(__('laraansible::laraansible.choices'))
+                        ->keyLabel(__('laraansible::laraansible.choices_key'))
+                        ->valueLabel(__('laraansible::laraansible.choices_value'))
                         ->required()
                         ->columnSpanFull(),
                     Forms\Components\Toggle::make('required')
-                        ->label('Required')
+                        ->label(__('laraansible::laraansible.required'))
                         ->default(true),
                 ])
                 ->columns(2)
                 ->collapsible()
-                ->itemLabel(fn (array $state): ?string => $state['label'] ?? $state['name'] ?? 'Input')
-                ->addActionLabel('Add input')
+                ->itemLabel(fn (array $state): ?string => $state['label'] ?? $state['name'] ?? __('laraansible::laraansible.input'))
+                ->addActionLabel(__('laraansible::laraansible.add_input'))
                 ->default([]),
         ];
-    }
-
-    /**
-     * Parse Ansible `vars_prompt` blocks out of a playbook and map them to input
-     * definitions (name/label/type/default). Choices aren't expressible in vars_prompt,
-     * so selects still need their options set by hand afterwards.
-     */
-    protected static function detectInputVars(string $content): array
-    {
-        if (trim($content) === '') {
-            return [];
-        }
-
-        try {
-            $parsed = \Symfony\Component\Yaml\Yaml::parse($content);
-        } catch (\Throwable $e) {
-            return [];
-        }
-
-        if (! is_array($parsed)) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($parsed as $play) {
-            if (! is_array($play) || empty($play['vars_prompt']) || ! is_array($play['vars_prompt'])) {
-                continue;
-            }
-
-            foreach ($play['vars_prompt'] as $vp) {
-                if (! is_array($vp) || blank($vp['name'] ?? null)) {
-                    continue;
-                }
-
-                $label = trim(strtok((string) ($vp['prompt'] ?? ''), "\n"));
-
-                $out[] = [
-                    'name' => $vp['name'],
-                    'label' => $label !== '' ? $label : $vp['name'],
-                    'default' => (string) ($vp['default'] ?? ''),
-                    'options' => [],
-                    'required' => true,
-                ];
-            }
-        }
-
-        return $out;
     }
 }

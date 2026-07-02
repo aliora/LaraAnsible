@@ -1,0 +1,27 @@
+{
+    "preset": "laravel",
+    "rules": {
+        "no_extra_blank_lines": {
+            "tokens": [
+                "break",
+                "case",
+                "continue",
+                "curly_brace_block",
+                "default",
+                "extra",
+                "parenthesis_brace_block",
+                "return",
+                "square_brace_block",
+                "switch",
+                "throw",
+                "use"
+            ]
+        },
+        "no_blank_lines_after_class_opening": true,
+        "no_whitespace_in_blank_line": true,
+        "ordered_imports": {
+            "sort_algorithm": "alpha",
+            "imports_order": ["const", "class", "function"]
+        }
+    }
+}

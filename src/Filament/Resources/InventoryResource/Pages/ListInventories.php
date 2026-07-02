@@ -9,7 +9,7 @@ use Filament\Resources\Pages\ListRecords;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Support\Enums\Width;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
 use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
@@ -28,37 +28,24 @@ class ListInventories extends ListRecords
     protected function getHeaderActions(): array
     {
         $setting = AnsibleSetting::getInstance();
-        $foreignKey = $setting?->child_parent_foreign_key ?? 'parent_id';
 
         return [
             Actions\CreateAction::make(),
 
             Actions\Action::make('import_from_database')
-                ->label('Import Hosts')
+                ->label(__('laraansible::laraansible.import_hosts'))
                 ->icon('heroicon-o-arrow-down-circle')
                 ->color('info')
                 ->visible(fn () => $setting && $setting->child_table)
-                ->form(function () use ($setting, $foreignKey) {
+                ->form(function () use ($setting) {
                     if (! $setting || ! $setting->child_table) {
                         return [];
                     }
 
-                    $parentOptions = [];
-                    if ($setting->parent_table) {
-                        try {
-                            $labelColumn = $setting->parent_label_column ?? 'name';
-                            $parentOptions = DB::table($setting->parent_table)
-                                ->pluck($labelColumn, 'id')
-                                ->toArray();
-                        } catch (\Exception $e) {
-                            $parentOptions = [];
-                        }
-                    }
-
                     return [
                         Forms\Components\Select::make('parent_id')
-                            ->label(FormSchemaHelper::formatLabel($setting?->parent_table, 'Select Group'))
-                            ->options($parentOptions)
+                            ->label(FormSchemaHelper::formatLabel($setting?->parent_table, __('laraansible::laraansible.select_group')))
+                            ->options($setting->parentOptions())
                             ->live()
                             ->searchable()
                             ->required()
@@ -68,152 +55,85 @@ class ListInventories extends ListRecords
                         Grid::make(3)
                             ->schema([
                                 Forms\Components\Placeholder::make('total')
-                                    ->label('Total Hosts')
-                                    ->content(function (callable $get) use ($setting, $foreignKey) {
+                                    ->label(__('laraansible::laraansible.total_hosts'))
+                                    ->content(function (callable $get) use ($setting) {
                                         $parentId = $get('parent_id');
-                                        if (! $parentId || ! $setting) {
-                                            return '-';
-                                        }
 
-                                        try {
-                                            return DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->count();
-                                        } catch (\Exception $e) {
-                                            return '-';
-                                        }
+                                        return $parentId ? $setting->childrenOf($parentId)->count() : '-';
                                     })
                                     ->icon('heroicon-o-server-stack')
                                     ->iconColor('gray'),
 
                                 Forms\Components\Placeholder::make('imported')
-                                    ->label('Imported')
-                                    ->content(function (callable $get) use ($setting, $foreignKey) {
+                                    ->label(__('laraansible::laraansible.imported'))
+                                    ->content(function (callable $get) use ($setting) {
                                         $parentId = $get('parent_id');
-                                        if (! $parentId || ! $setting) {
-                                            return '-';
-                                        }
 
-                                        try {
-                                            $childIds = DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->pluck('id')
-                                                ->toArray();
-
-                                            return count($this->getImportedChildIds($childIds));
-                                        } catch (\Exception $e) {
-                                            return '-';
-                                        }
+                                        return $parentId
+                                            ? count($this->getImportedChildIds($setting->childIdsOf($parentId)))
+                                            : '-';
                                     })
                                     ->icon('heroicon-o-check-circle')
                                     ->iconColor('success'),
 
                                 Forms\Components\Placeholder::make('available')
-                                    ->label('Available')
-                                    ->content(function (callable $get) use ($setting, $foreignKey) {
+                                    ->label(__('laraansible::laraansible.available'))
+                                    ->content(function (callable $get) use ($setting) {
                                         $parentId = $get('parent_id');
-                                        if (! $parentId || ! $setting) {
+                                        if (! $parentId) {
                                             return '-';
                                         }
 
-                                        try {
-                                            $total = DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->count();
+                                        $childIds = $setting->childIdsOf($parentId);
+                                        $imported = count($this->getImportedChildIds($childIds));
 
-                                            $childIds = DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->pluck('id')
-                                                ->toArray();
-
-                                            $imported = count($this->getImportedChildIds($childIds));
-
-                                            return max(0, $total - $imported);
-                                        } catch (\Exception $e) {
-                                            return '-';
-                                        }
+                                        return max(0, count($childIds) - $imported);
                                     })
                                     ->icon('heroicon-o-plus-circle')
                                     ->iconColor('primary'),
                             ])
                             ->visible(fn (callable $get): bool => ! empty($get('parent_id'))),
 
-                        Section::make('Hosts')
-                            ->description('Select hosts to import into inventory')
+                        Section::make(__('laraansible::laraansible.hosts'))
+                            ->description(__('laraansible::laraansible.import_hosts_description'))
                             ->schema([
                                 Forms\Components\CheckboxList::make('child_ids')
                                     ->hiddenLabel()
                                     ->extraAlpineAttributes([
                                         'class' => 'laraansible-hosts-checkbox-list',
                                     ])
-                                    ->options(function (callable $get) use ($setting, $foreignKey) {
+                                    ->options(function (callable $get) use ($setting) {
                                         $parentId = $get('parent_id');
                                         if (! $parentId) {
                                             return [];
                                         }
 
-                                        try {
-                                            $labelColumn = $setting->child_label_column ?? 'name';
-                                            $hostnameColumn = $setting->child_hostname_column;
-                                            $versionColumn = $setting->version_column;
+                                        $children = $setting->childrenOf($parentId);
+                                        $existingChildIds = $this->getImportedChildIds($children->pluck('id')->all());
 
-                                            $children = DB::table($setting->child_table)
-                                                ->where($foreignKey, $parentId)
-                                                ->get();
-
-                                            $existingChildIds = $this->getImportedChildIds($children->pluck('id')->all());
-
-                                            return $children->mapWithKeys(function ($child) use ($labelColumn, $hostnameColumn, $versionColumn, $existingChildIds) {
-                                                $label = $child->{$labelColumn} ?? 'Unknown';
-                                                $hostname = $child->{$hostnameColumn} ?? 'N/A';
-                                                $version = $versionColumn && isset($child->{$versionColumn}) ? $child->{$versionColumn} : 'N/A';
-                                                $isImported = in_array($child->id, $existingChildIds);
-
-                                                // Icons using Heroicons style paths but simpler color scheme
-                                                $serverIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>';
-                                                $ipIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>';
-                                                $versionIcon = '<svg class="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>';
-
-                                                $statusIcon = $isImported
-                                                    ? '<svg class="w-4 h-4 text-success-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>'
-                                                    : '<svg class="w-4 h-4 text-primary-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
-
-                                                $bgClass = $isImported
-                                                    ? 'bg-success-50/50 dark:bg-success-900/10 border-success-200 dark:border-success-800'
-                                                    : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-700';
-
-                                                $opacityClass = $isImported ? 'opacity-75' : '';
-
-                                                $fullLabel = '<div class="flex items-center gap-4 py-2 px-3 rounded-lg border transition duration-150 '.$bgClass.' '.$opacityClass.' w-full">'
-                                                    .'<div class="flex items-center gap-2 min-w-[150px] font-medium text-gray-900 dark:text-white">'.$serverIcon.' <span class="truncate">'.$label.'</span></div>'
-                                                    .'<div class="flex items-center gap-1.5 min-w-[120px] text-sm text-gray-600 dark:text-gray-400">'.$ipIcon.' <span class="truncate">'.$hostname.'</span></div>'
-                                                    .'<div class="flex items-center gap-1.5 min-w-[80px] text-sm text-gray-500 dark:text-gray-400">'.$versionIcon.' <span class="truncate">'.$version.'</span></div>'
-                                                    .'<div class="ml-auto flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider '.($isImported ? 'text-success-600 dark:text-success-400' : 'text-primary-600 dark:text-primary-400').'">'.$statusIcon.' <span>'.($isImported ? 'Imported' : 'Available').'</span></div>'
-                                                    .'</div>';
-
-                                                return [$child->id => new HtmlString($fullLabel)];
-                                            })->toArray();
-                                        } catch (\Exception $e) {
-                                            return [];
-                                        }
+                                        return $children
+                                            ->mapWithKeys(fn ($child) => [
+                                                $child->id => new HtmlString($this->buildHostOptionLabel($child, $setting, $existingChildIds)),
+                                            ])
+                                            ->toArray();
                                     })
                                     ->bulkToggleable()
                                     ->columns(1)
-                                    ->in(fn (): array => DB::table($setting->child_table)->pluck('id')->all())
+                                    ->in(fn (): array => $setting->allChildIds())
                                     ->required(),
                             ])
                             ->columnSpanFull()
                             ->visible(fn (callable $get): bool => ! empty($get('parent_id'))),
                     ];
                 })
-                ->modalHeading('Import Hosts')
+                ->modalHeading(__('laraansible::laraansible.import_hosts'))
                 ->modalWidth('3xl')
-                ->modalSubmitActionLabel('Import Selected')
+                ->modalSubmitActionLabel(__('laraansible::laraansible.import_selected'))
                 ->action(function (array $data) use ($setting) {
                     if (empty($data['child_ids'])) {
                         Notification::make()
                             ->warning()
-                            ->title('No hosts selected')
+                            ->title(__('laraansible::laraansible.no_hosts_selected'))
                             ->send();
 
                         return;
@@ -224,14 +144,12 @@ class ListInventories extends ListRecords
                     }
 
                     try {
-                        $children = DB::table($setting->child_table)
-                            ->whereIn('id', $data['child_ids'])
-                            ->get();
+                        $children = $setting->childrenById($data['child_ids']);
 
                         if ($children->isEmpty()) {
                             Notification::make()
                                 ->warning()
-                                ->title('No hosts found')
+                                ->title(__('laraansible::laraansible.no_hosts_found'))
                                 ->send();
 
                             return;
@@ -268,7 +186,6 @@ class ListInventories extends ListRecords
                             if ($alias === '') {
                                 $alias = 'host_'.$child->id;
                             }
-                            // Keep spaces and other Ansible-compatible chars, only replace special chars
                             $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', Inventory::transliterate($alias));
 
                             $finalAlias = $alias;
@@ -278,9 +195,7 @@ class ListInventories extends ListRecords
                                 $suffix++;
                             }
 
-                            // Clean hostname - remove any embedded newlines/tabs
-                            $cleanHostname = preg_replace('/[\r\n\t]+/', '', $hostname);
-                            $hostsEntry[$finalAlias] = $cleanHostname;
+                            $hostsEntry[$finalAlias] = preg_replace('/[\r\n\t]+/', '', $hostname);
                             $importedChildIds[] = $child->id;
 
                             if ($portColumn && isset($child->{$portColumn})) {
@@ -294,7 +209,7 @@ class ListInventories extends ListRecords
                         if (empty($hostsEntry)) {
                             Notification::make()
                                 ->warning()
-                                ->title('No new hosts to import')
+                                ->title(__('laraansible::laraansible.no_new_hosts'))
                                 ->send();
 
                             return;
@@ -313,14 +228,8 @@ class ListInventories extends ListRecords
                             $username = (string) $usernameValues[0];
                         }
 
-                        $inventoryName = 'Imported Hosts';
-                        if (! empty($data['parent_id']) && $setting->parent_table) {
-                            $parent = DB::table($setting->parent_table)->find($data['parent_id']);
-                            if ($parent) {
-                                $parentLabelColumn = $setting->parent_label_column ?? 'name';
-                                $inventoryName = $parent->{$parentLabelColumn} ?? $inventoryName;
-                            }
-                        }
+                        $inventoryName = $setting->parentLabelFor($data['parent_id'] ?? null)
+                            ?? __('laraansible::laraansible.imported_hosts_name');
 
                         $inventoryData = [
                             'name' => $inventoryName,
@@ -342,11 +251,11 @@ class ListInventories extends ListRecords
 
                         $imported = count($hostsEntry);
                     } catch (\Exception $e) {
-                        \Log::error('Failed to import inventory: '.$e->getMessage());
+                        Log::error('Failed to import inventory: '.$e->getMessage());
 
                         Notification::make()
                             ->danger()
-                            ->title('Import failed')
+                            ->title(__('laraansible::laraansible.import_failed'))
                             ->body($e->getMessage())
                             ->send();
 
@@ -355,11 +264,46 @@ class ListInventories extends ListRecords
 
                     Notification::make()
                         ->success()
-                        ->title('Import completed')
-                        ->body("{$imported} hosts imported, {$skipped} skipped")
+                        ->title(__('laraansible::laraansible.import_completed'))
+                        ->body(__('laraansible::laraansible.import_summary', ['imported' => $imported, 'skipped' => $skipped]))
                         ->send();
                 }),
         ];
+    }
+
+    protected function buildHostOptionLabel(object $child, AnsibleSetting $setting, array $existingChildIds): string
+    {
+        $labelColumn = $setting->child_label_column ?? 'name';
+        $versionColumn = $setting->version_column;
+
+        $label = $child->{$labelColumn} ?? __('laraansible::laraansible.unknown');
+        $hostname = $child->{$setting->child_hostname_column} ?? __('laraansible::laraansible.not_available');
+        $version = $versionColumn && isset($child->{$versionColumn}) ? $child->{$versionColumn} : __('laraansible::laraansible.not_available');
+        $isImported = in_array($child->id, $existingChildIds);
+
+        $mutedIconClass = 'w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0';
+        $serverIcon = svg('heroicon-o-server-stack', $mutedIconClass)->toHtml();
+        $ipIcon = svg('heroicon-o-globe-alt', $mutedIconClass)->toHtml();
+        $versionIcon = svg('heroicon-o-tag', $mutedIconClass)->toHtml();
+
+        $statusIcon = $isImported
+            ? svg('heroicon-s-check-circle', 'w-4 h-4 text-success-500 shrink-0')->toHtml()
+            : svg('heroicon-o-plus-circle', 'w-4 h-4 text-primary-500 shrink-0')->toHtml();
+
+        $statusLabel = $isImported
+            ? __('laraansible::laraansible.imported')
+            : __('laraansible::laraansible.available');
+
+        $bgClass = $isImported
+            ? 'bg-success-50/50 dark:bg-success-900/10 border-success-200 dark:border-success-800 opacity-75'
+            : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-700';
+
+        return '<div class="flex items-center gap-4 py-2 px-3 rounded-lg border transition duration-150 '.$bgClass.' w-full">'
+            .'<div class="flex items-center gap-2 min-w-[150px] font-medium text-gray-900 dark:text-white">'.$serverIcon.' <span class="truncate">'.$label.'</span></div>'
+            .'<div class="flex items-center gap-1.5 min-w-[120px] text-sm text-gray-600 dark:text-gray-400">'.$ipIcon.' <span class="truncate">'.$hostname.'</span></div>'
+            .'<div class="flex items-center gap-1.5 min-w-[80px] text-sm text-gray-500 dark:text-gray-400">'.$versionIcon.' <span class="truncate">'.$version.'</span></div>'
+            .'<div class="ml-auto flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider '.($isImported ? 'text-success-600 dark:text-success-400' : 'text-primary-600 dark:text-primary-400').'">'.$statusIcon.' <span>'.$statusLabel.'</span></div>'
+            .'</div>';
     }
 
     protected function getImportedChildIds(array $childIds): array
@@ -387,8 +331,6 @@ class ListInventories extends ListRecords
             }
         }
 
-        $importedIds = array_values(array_unique(array_intersect($importedIds, $childIds)));
-
-        return $importedIds;
+        return array_values(array_unique(array_intersect($importedIds, $childIds)));
     }
 }

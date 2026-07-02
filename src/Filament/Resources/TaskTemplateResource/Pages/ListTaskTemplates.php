@@ -18,21 +18,21 @@ class ListTaskTemplates extends ListRecords
     {
         return [
             Actions\Action::make('import')
-                ->label('Import Playbooks')
+                ->label(__('laraansible::laraansible.import_playbooks'))
                 ->icon('heroicon-o-arrow-up-tray')
                 ->color('gray')
-                ->modalHeading('Bulk Import Job Templates')
-                ->modalDescription('Upload one or more playbook files. Each file becomes a job template (filename = name).')
+                ->modalHeading(__('laraansible::laraansible.bulk_import_jobs_heading'))
+                ->modalDescription(__('laraansible::laraansible.bulk_import_jobs_description'))
                 ->schema([
                     Forms\Components\FileUpload::make('files')
-                        ->label('Playbook Files')
+                        ->label(__('laraansible::laraansible.playbook_files'))
                         ->multiple()
                         ->required()
                         ->preserveFilenames()
                         ->storeFiles(true)
                         ->disk('local')
                         ->directory('ansible-playbook-imports')
-                        ->helperText('e.g. install-all.yml, git-pull.yml'),
+                        ->helperText(__('laraansible::laraansible.playbook_files_help')),
                 ])
                 ->action(function (array $data): void {
                     $count = 0;
@@ -53,7 +53,7 @@ class ListTaskTemplates extends ListRecords
 
                     Notification::make()
                         ->success()
-                        ->title("Imported {$count} job template(s)")
+                        ->title(__('laraansible::laraansible.imported_job_templates', ['count' => $count]))
                         ->send();
                 }),
             Actions\CreateAction::make(),

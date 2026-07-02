@@ -13,20 +13,20 @@ class DeploymentStatsWidget extends BaseWidget
     protected function getStats(): array
     {
         return [
-            Stat::make('Total Servers', Inventory::where('is_active', true)->count())
-                ->description('Active servers in inventory')
+            Stat::make(__('laraansible::laraansible.total_servers'), Inventory::where('is_active', true)->count())
+                ->description(__('laraansible::laraansible.total_servers_description'))
                 ->descriptionIcon('heroicon-o-server')
                 ->color('success'),
-            Stat::make('Task Templates', TaskTemplate::where('is_active', true)->count())
-                ->description('Available task templates')
+            Stat::make(__('laraansible::laraansible.task_templates'), TaskTemplate::where('is_active', true)->count())
+                ->description(__('laraansible::laraansible.task_templates_description'))
                 ->descriptionIcon('heroicon-o-document-text')
                 ->color('primary'),
-            Stat::make('Total Deployments', Deployment::count())
-                ->description(Deployment::where('status', 'success')->count().' successful')
+            Stat::make(__('laraansible::laraansible.total_deployments'), Deployment::count())
+                ->description(__('laraansible::laraansible.successful_count', ['count' => Deployment::where('status', 'success')->count()]))
                 ->descriptionIcon('heroicon-o-rocket-launch')
                 ->color('info'),
-            Stat::make('Running Deployments', Deployment::where('status', 'running')->count())
-                ->description('Currently executing')
+            Stat::make(__('laraansible::laraansible.running_deployments'), Deployment::where('status', 'running')->count())
+                ->description(__('laraansible::laraansible.currently_executing'))
                 ->descriptionIcon('heroicon-o-play')
                 ->color('warning'),
         ];

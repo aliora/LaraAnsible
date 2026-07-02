@@ -3,9 +3,8 @@
 namespace VisioSoft\LaraAnsible\Filament\Resources\InventoryResource\Pages;
 
 use Filament\Resources\Pages\ViewRecord;
-use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
-
 use Filament\Support\Enums\Width;
+use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 
 class ViewInventory extends ViewRecord
 {

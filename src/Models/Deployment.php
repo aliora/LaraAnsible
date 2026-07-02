@@ -4,14 +4,19 @@ namespace VisioSoft\LaraAnsible\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Deployment extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'task_template_id',
         'user_id',
-        'log_id',
+        'job_id',
         'inventory_ids',
+        'target_ip',
+        'playbook_name',
         'inventory_file',
         'status',
         'command_input',
@@ -45,13 +50,15 @@ class Deployment extends Model
         'processed_hosts' => 'integer',
     ];
 
+    /**
+     * Every deployment gets a job_id (names its log file); defaults to the row
+     * id but stays a distinct, user-visible column.
+     */
     protected static function booted(): void
     {
-        // Give every deployment a log id (used to name its log file). Defaults to
-        // the row id, but is a distinct column so it can be surfaced/toggled in the UI.
         static::created(function (Deployment $deployment): void {
-            if (blank($deployment->log_id)) {
-                $deployment->log_id = (string) $deployment->id;
+            if (blank($deployment->job_id)) {
+                $deployment->job_id = (string) $deployment->id;
                 $deployment->saveQuietly();
             }
         });
@@ -76,14 +83,39 @@ class Deployment extends Model
     }
 
     /**
+     * Log file name for this run, e.g. JobID_25.log.
+     */
+    public function logFileName(): string
+    {
+        return 'JobID_'.($this->job_id ?: $this->id).'.log';
+    }
+
+    /**
      * Absolute path of this deployment's ansible log file:
-     * storage/logs/ansible-playbook/<id>.log
+     * storage/logs/ansible-playbook/JobID_<id>.log
      */
     public function logPath(): string
     {
-        $name = $this->log_id ?: $this->id;
+        return storage_path('logs/ansible-playbook/'.$this->logFileName());
+    }
 
-        return storage_path('logs/ansible-playbook/'.$name.'.log');
+    /**
+     * Relative (storage-rooted) path of the log file, e.g.
+     * logs/ansible-playbook/JobID_25.log. Derived from job_id so no extra column
+     * is stored. Exposed as $deployment->log_file_path.
+     */
+    public function getLogFilePathAttribute(): string
+    {
+        return 'logs/ansible-playbook/'.$this->logFileName();
+    }
+
+    /**
+     * Legacy log path used before the JobID_ prefix (storage/.../<id>.log).
+     * Kept so old runs stay viewable after the rename.
+     */
+    protected function legacyLogPath(): string
+    {
+        return storage_path('logs/ansible-playbook/'.($this->job_id ?: $this->id).'.log');
     }
 
     protected function ensureLogDir(): void
@@ -108,11 +140,16 @@ class Deployment extends Model
         file_put_contents($this->logPath(), $text, FILE_APPEND | LOCK_EX);
     }
 
-    /** Read the full log file (empty string if none yet). */
+    /** Read the full log file, falling back to the pre-rename name for old runs. */
     public function readLog(): string
     {
         $path = $this->logPath();
+        if (is_file($path)) {
+            return (string) file_get_contents($path);
+        }
 
-        return is_file($path) ? (string) file_get_contents($path) : '';
+        $legacy = $this->legacyLogPath();
+
+        return is_file($legacy) ? (string) file_get_contents($legacy) : '';
     }
 }

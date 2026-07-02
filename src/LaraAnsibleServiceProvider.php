@@ -4,13 +4,14 @@ namespace VisioSoft\LaraAnsible;
 
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\ServiceProvider;
+use Livewire\Livewire;
+use VisioSoft\LaraAnsible\Console\PruneAnsibleLogs;
+use VisioSoft\LaraAnsible\Livewire\TerminalViewer;
 
 class LaraAnsibleServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
     public function register(): void
     {
         $this->mergeConfigFrom(
@@ -19,16 +20,14 @@ class LaraAnsibleServiceProvider extends ServiceProvider
         );
     }
 
-    /**
-     * Bootstrap any application services.
-     */
     public function boot(): void
     {
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'laraansible');
+        $this->loadTranslationsFrom(__DIR__.'/../resources/lang', 'laraansible');
 
         FilamentAsset::register([
-            Css::make('laraansible-styles', __DIR__ . '/../resources/css/laraansible.css'),
+            Css::make('laraansible-styles', __DIR__.'/../resources/css/laraansible.css'),
         ], 'visio/laraansible');
 
         $this->publishes([
@@ -43,6 +42,20 @@ class LaraAnsibleServiceProvider extends ServiceProvider
             __DIR__.'/../resources/views' => resource_path('views/vendor/laraansible'),
         ], 'laraansible-views');
 
-        \Livewire\Livewire::component('terminal-viewer', \VisioSoft\LaraAnsible\Livewire\TerminalViewer::class);
+        $this->publishes([
+            __DIR__.'/../resources/lang' => $this->app->langPath('vendor/laraansible'),
+        ], 'laraansible-translations');
+
+        Livewire::component('terminal-viewer', TerminalViewer::class);
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                PruneAnsibleLogs::class,
+            ]);
+
+            $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
+                $schedule->command('ansible:prune-logs')->daily();
+            });
+        }
     }
 }

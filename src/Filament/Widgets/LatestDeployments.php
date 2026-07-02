@@ -21,11 +21,11 @@ class LatestDeployments extends BaseWidget
             )
             ->columns([
                 Tables\Columns\TextColumn::make('id')
-                    ->label('ID'),
+                    ->label(__('laraansible::laraansible.id')),
                 Tables\Columns\TextColumn::make('taskTemplate.name')
-                    ->label('Task'),
+                    ->label(__('laraansible::laraansible.task')),
                 Tables\Columns\TextColumn::make('user.name')
-                    ->label('User'),
+                    ->label(__('laraansible::laraansible.user')),
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
                     ->colors([
@@ -36,20 +36,20 @@ class LatestDeployments extends BaseWidget
                         'danger' => 'failed',
                     ])
                     ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'pending' => 'Pending',
-                        'warning' => 'Warning',
-                        'running' => 'Running',
-                        'success' => 'Successful',
-                        'failed' => 'Failed',
+                        'pending' => __('laraansible::laraansible.status_pending'),
+                        'warning' => __('laraansible::laraansible.status_warning'),
+                        'running' => __('laraansible::laraansible.status_running'),
+                        'success' => __('laraansible::laraansible.status_success'),
+                        'failed' => __('laraansible::laraansible.status_failed'),
                         default => $state,
                     }),
                 Tables\Columns\TextColumn::make('started_at')
                     ->dateTime()
-                    ->label('Started'),
+                    ->label(__('laraansible::laraansible.started')),
                 Tables\Columns\TextColumn::make('completed_at')
                     ->dateTime()
-                    ->label('Completed'),
+                    ->label(__('laraansible::laraansible.completed')),
             ])
-            ->heading('Latest Deployments');
+            ->heading(__('laraansible::laraansible.latest_deployments'));
     }
 }

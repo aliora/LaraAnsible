@@ -12,50 +12,68 @@ use Filament\Tables\Enums\RecordActionsPosition;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\HtmlString;
+use VisioSoft\LaraAnsible\Filament\Concerns\AuthorizesAnsibleAccess;
+use VisioSoft\LaraAnsible\Filament\Concerns\HasInventoryConflictGuard;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
+use VisioSoft\LaraAnsible\Helpers\TableHelper;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Models\Inventory;
 use VisioSoft\LaraAnsible\Services\DeploymentService;
 
 class OnGoingTasksPage extends Page implements HasTable
 {
+    use AuthorizesAnsibleAccess;
+    use HasInventoryConflictGuard;
     use InteractsWithTable;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-play-circle';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
-
     protected static ?int $navigationSort = 10;
-
-    protected static ?string $navigationLabel = 'Activity Log';
-
-    protected static ?string $title = 'Activity Log';
 
     protected static ?string $slug = 'ansible/on-going-tasks';
 
     protected string $view = 'laraansible::pages.on-going-tasks';
 
-    /**
-     * Polling interval in seconds for refreshing deployment status.
-     */
+    public static function getNavigationGroup(): ?string
+    {
+        return __('laraansible::laraansible.nav_group');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('laraansible::laraansible.activity_log');
+    }
+
+    public function getTitle(): string
+    {
+        return __('laraansible::laraansible.activity_log');
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->query(
                 Deployment::query()
                     ->with(['taskTemplate', 'user'])
-                    // Show all deployments, including history
                     ->orderByDesc('created_at')
             )
             ->poll('3s')
             ->columns([
                 Tables\Columns\TextColumn::make('taskTemplate.name')
-                    ->label('Task')
+                    ->label(__('laraansible::laraansible.task'))
                     ->searchable()
                     ->sortable()
                     ->icon('heroicon-o-command-line'),
+                Tables\Columns\TextColumn::make('inventory_names')
+                    ->label(__('laraansible::laraansible.inventory'))
+                    ->badge()
+                    ->color('gray')
+                    ->icon('heroicon-o-server')
+                    ->limit(40)
+                    ->state(fn (Deployment $record): string => Inventory::whereIn('id', $record->inventory_ids ?? [])->pluck('name')->join(', ') ?: '—')
+                    ->tooltip(fn (Deployment $record): ?string => Inventory::whereIn('id', $record->inventory_ids ?? [])->pluck('name')->join(', ') ?: null),
                 Tables\Columns\TextColumn::make('total_hosts')
-                    ->label('Hosts')
+                    ->label(__('laraansible::laraansible.hosts'))
                     ->state(function (Deployment $record): int {
                         $inventoryIds = $record->inventory_ids ?? [];
                         if (empty($inventoryIds)) {
@@ -76,12 +94,12 @@ class OnGoingTasksPage extends Page implements HasTable
                     })
                     ->badge()
                     ->color('info')
-                    ->suffix(' hosts'),
+                    ->suffix(' '.__('laraansible::laraansible.hosts_suffix')),
                 Tables\Columns\ViewColumn::make('progress')
-                    ->label('Progress')
+                    ->label(__('laraansible::laraansible.progress'))
                     ->view('laraansible::filament.columns.progress-bar'),
                 Tables\Columns\TextColumn::make('status')
-                    ->label('Status')
+                    ->label(__('laraansible::laraansible.status'))
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {
                         'warning' => 'warning',
@@ -98,102 +116,102 @@ class OnGoingTasksPage extends Page implements HasTable
                         default => 'heroicon-o-clock',
                     })
                     ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'pending' => 'Pending',
-                        'warning' => 'Warning',
-                        'running' => 'Running',
-                        'success' => 'Successful',
-                        'failed' => 'Failed',
+                        'pending' => __('laraansible::laraansible.status_pending'),
+                        'warning' => __('laraansible::laraansible.status_warning'),
+                        'running' => __('laraansible::laraansible.status_running'),
+                        'success' => __('laraansible::laraansible.status_success'),
+                        'failed' => __('laraansible::laraansible.status_failed'),
                         default => $state,
                     }),
                 Tables\Columns\TextColumn::make('user.name')
-                    ->label('Started By')
+                    ->label(__('laraansible::laraansible.started_by'))
                     ->placeholder('-'),
-                Tables\Columns\TextColumn::make('log_id')
-                    ->label('Log ID')
+                Tables\Columns\TextColumn::make('job_id')
+                    ->label(__('laraansible::laraansible.job_id'))
                     ->badge()
                     ->color('gray')
                     ->copyable()
-                    ->copyMessage('Log ID copied')
+                    ->copyMessage(__('laraansible::laraansible.job_id_copied'))
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('started_at')
-                    ->label('Started At')
+                    ->label(__('laraansible::laraansible.started_at'))
                     ->dateTime('d.m.Y H:i:s')
-                    ->description(fn (Deployment $record): ?string => $record->completed_at ? 'Ended: '.$record->completed_at->format('d.m.Y H:i:s') : null)
+                    ->description(fn (Deployment $record): ?string => $record->completed_at
+                        ? __('laraansible::laraansible.ended_at', ['time' => $record->completed_at->format('d.m.Y H:i:s')])
+                        : null)
                     ->sortable(),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
-                    ->label('Status')
+                    ->label(__('laraansible::laraansible.status'))
                     ->options([
-                        'pending' => 'Pending',
-                        'warning' => 'Warning',
-                        'running' => 'Running',
-                        'success' => 'Successful',
-                        'failed' => 'Failed',
+                        'pending' => __('laraansible::laraansible.status_pending'),
+                        'warning' => __('laraansible::laraansible.status_warning'),
+                        'running' => __('laraansible::laraansible.status_running'),
+                        'success' => __('laraansible::laraansible.status_success'),
+                        'failed' => __('laraansible::laraansible.status_failed'),
                     ]),
             ])
-            ->actions([
-                // All row operations grouped under an "İşlemler" dropdown button.
-                Actions\ActionGroup::make([
-                    Actions\Action::make('watch_terminal')
-                        ->label('Logs')
-                        ->icon('heroicon-o-computer-desktop')
-                        ->color('info')
-                        ->modalHeading(fn (Deployment $record): string => "Terminal: {$record->taskTemplate?->name}")
-                        ->modalContent(function (Deployment $record): HtmlString {
-                            return new HtmlString(Blade::render(
-                                '<livewire:terminal-viewer :deployment-id="$id" />',
-                                ['id' => $record->id]
-                            ));
-                        })
-                        ->modalWidth('4xl')
-                        ->modalSubmitAction(false)
-                        ->modalCancelActionLabel('Close'),
-                    Actions\Action::make('repeat_job')
-                        ->label('Repeat')
-                        ->icon('heroicon-o-arrow-path')
-                        ->color('warning')
-                        ->requiresConfirmation()
-                        ->modalHeading('Repeat Job')
-                        ->modalDescription(fn (Deployment $record): string => "Do you want to repeat the job '{$record->taskTemplate?->name}' with the same configuration?")
-                        ->modalSubmitActionLabel('Yes, Repeat')
-                        ->action(function (Deployment $record): void {
-                            app(DeploymentService::class)->createWithInventoryIds(
-                                $record->inventory_ids ?? [],
-                                $record->task_template_id,
-                                extraVars: $record->extra_vars ?? [],
-                            );
-                        })
-                        ->successNotificationTitle('Job repeated successfully'),
-                    Actions\Action::make('cancel_job')
-                        ->label('Stop')
-                        ->icon('heroicon-o-stop-circle')
-                        ->color('danger')
-                        ->visible(fn (Deployment $record): bool => in_array($record->status, ['running', 'pending'], true))
-                        ->requiresConfirmation()
-                        ->modalHeading('Stop Job')
-                        ->modalDescription(fn (Deployment $record): string => "Stop the running job '{$record->taskTemplate?->name}'? This kills its ansible process on the controller.")
-                        ->modalSubmitActionLabel('Yes, Stop')
-                        ->action(function (Deployment $record): void {
-                            app(DeploymentService::class)->cancel($record);
-                        })
-                        ->successNotificationTitle('Job stopped'),
-                ])
-                    ->label('İşlemler')
-                    ->icon('heroicon-m-ellipsis-vertical')
-                    ->color('primary')
-                    ->button(),
-            ], RecordActionsPosition::BeforeColumns)
+            ->actions(TableHelper::actionGroup([
+                Actions\Action::make('watch_terminal')
+                    ->label(__('laraansible::laraansible.view_log'))
+                    ->icon('heroicon-o-computer-desktop')
+                    ->color('info')
+                    ->modalHeading(fn (Deployment $record): string => __('laraansible::laraansible.terminal_heading', ['name' => $record->taskTemplate?->name]))
+                    ->modalContent(function (Deployment $record): HtmlString {
+                        return new HtmlString(Blade::render(
+                            '<livewire:terminal-viewer :deployment-id="$id" />',
+                            ['id' => $record->id]
+                        ));
+                    })
+                    ->modalWidth('4xl')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel(__('laraansible::laraansible.close')),
+                Actions\Action::make('repeat_job')
+                    ->label(__('laraansible::laraansible.repeat'))
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalHeading(__('laraansible::laraansible.repeat_job'))
+                    ->modalDescription(fn (Deployment $record): string => __('laraansible::laraansible.repeat_job_confirm', ['name' => $record->taskTemplate?->name]))
+                    ->modalSubmitActionLabel(__('laraansible::laraansible.yes_repeat'))
+                    ->action(function (Deployment $record): void {
+                        $inv = $record->inventory_ids ?? [];
+                        $vars = $record->extra_vars ?? [];
+                        if ($this->guardInventoryConflict($inv, (int) $record->task_template_id, $vars)) {
+                            return;
+                        }
+                        app(DeploymentService::class)->createWithInventoryIds(
+                            $inv,
+                            $record->task_template_id,
+                            extraVars: $vars,
+                        );
+                    })
+                    ->successNotificationTitle(__('laraansible::laraansible.job_repeated')),
+                Actions\Action::make('cancel_job')
+                    ->label(__('laraansible::laraansible.stop'))
+                    ->icon('heroicon-o-stop-circle')
+                    ->color('danger')
+                    ->visible(fn (Deployment $record): bool => in_array($record->status, ['running', 'pending'], true))
+                    ->requiresConfirmation()
+                    ->modalHeading(__('laraansible::laraansible.stop_job'))
+                    ->modalDescription(fn (Deployment $record): string => __('laraansible::laraansible.stop_job_confirm', ['name' => $record->taskTemplate?->name]))
+                    ->modalSubmitActionLabel(__('laraansible::laraansible.yes_stop'))
+                    ->action(function (Deployment $record): void {
+                        app(DeploymentService::class)->cancel($record);
+                    })
+                    ->successNotificationTitle(__('laraansible::laraansible.job_stopped')),
+            ]), RecordActionsPosition::BeforeColumns)
             ->headerActions([
                 Actions\Action::make('create_new_job')
-                    ->label('New Job')
+                    ->label(__('laraansible::laraansible.new_job'))
                     ->icon('heroicon-o-plus-circle')
                     ->color('success')
-                    ->modalHeading('Start New Ansible Job')
+                    ->modalHeading(__('laraansible::laraansible.start_new_ansible_job'))
                     ->form([
                         Forms\Components\Select::make('inventory_ids')
-                            ->label('Target Hosts')
+                            ->label(__('laraansible::laraansible.target_hosts'))
                             ->options(Inventory::pluck('name', 'id'))
                             ->multiple()
                             ->searchable()
@@ -202,15 +220,17 @@ class OnGoingTasksPage extends Page implements HasTable
                         ...FormSchemaHelper::jobInputsSchema(),
                     ])
                     ->action(function (array $data): void {
-                        app(DeploymentService::class)->createWithInventoryIds(
-                            $data['inventory_ids'],
-                            (int) $data['task_template_id'],
-                            extraVars: FormSchemaHelper::collectInputVars($data),
-                        );
+                        $inv = $data['inventory_ids'];
+                        $tpl = (int) $data['task_template_id'];
+                        $vars = FormSchemaHelper::collectInputVars($data);
+                        if ($this->guardInventoryConflict($inv, $tpl, $vars)) {
+                            return;
+                        }
+                        app(DeploymentService::class)->createWithInventoryIds($inv, $tpl, extraVars: $vars);
                     }),
             ])
-            ->emptyStateHeading('No activities found')
-            ->emptyStateDescription('Use the "New Job" button to start a deployment.')
+            ->emptyStateHeading(__('laraansible::laraansible.no_activities'))
+            ->emptyStateDescription(__('laraansible::laraansible.no_activities_description'))
             ->emptyStateIcon('heroicon-o-play-circle');
     }
 

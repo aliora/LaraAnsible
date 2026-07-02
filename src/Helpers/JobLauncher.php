@@ -13,30 +13,11 @@ use VisioSoft\LaraAnsible\Models\Inventory;
 use VisioSoft\LaraAnsible\Services\DeploymentService;
 
 /**
- * Reusable "Run Job" button.
+ * Reusable "Run Job" button for any table (row or bulk action). The modal lets
+ * the operator pick a job and fill its inputs; every submitted field is passed
+ * to the playbook as --extra-vars. Bind row data via extraFields/defaultVars:
  *
- * Drop it into any table (row action or bulk action). It opens a modal that lets
- * the operator pick a job, fill in inputs, and launch it — the collected inputs
- * are passed to the playbook as --extra-vars ({{ variable }} in the YAML).
- *
- * Row action:
- *   ->actions([ JobLauncher::rowAction() ])
- *
- * Bind inputs to the row's columns — either as typed fields or as prefilled
- * key/value defaults:
- *   JobLauncher::rowAction(
- *       extraFields: [
- *           Forms\Components\Select::make('backend_choice')
- *               ->label('Backend')
- *               ->options(['1' => 'istay', '2' => 'zoneparkbiz', '3' => 'intetra', '4' => 'demirbank'])
- *               ->required(),
- *       ],
- *       defaultVars: fn (Model $r) => ['host_name' => $r->name, 'host_ip' => $r->ip],
- *   )
- *
- * Every typed field value (except the job select) and every key/value pair is
- * sent as an --extra-var, so a Select named `backend_choice` becomes
- * `--extra-vars '{"backend_choice":"2"}'` automatically.
+ *   JobLauncher::rowAction(defaultVars: fn (Model $r) => ['host_ip' => $r->ip])
  */
 class JobLauncher
 {
@@ -46,22 +27,23 @@ class JobLauncher
         ?Closure $defaultVars = null,
     ): Action {
         return Action::make($name)
-            ->label('Run')
+            ->label(__('laraansible::laraansible.run'))
             ->icon('heroicon-o-play')
             ->color('success')
             ->button()
-            ->modalHeading('Run Job')
-            ->modalDescription(fn (Model $record): string => "Run a job on '{$record->name}'")
-            ->modalSubmitActionLabel('Run')
+            ->modalHeading(__('laraansible::laraansible.run_job'))
+            ->modalDescription(fn (Model $record): string => __('laraansible::laraansible.run_job_on', ['name' => $record->name]))
+            ->modalSubmitActionLabel(__('laraansible::laraansible.run'))
             ->fillForm(fn (Model $record): array => [
                 'extra_vars' => $defaultVars ? $defaultVars($record) : [],
             ])
             ->schema(static::schema($extraFields))
-            ->action(function (Model $record, array $data): void {
-                app(DeploymentService::class)->createWithInventoryIds(
+            ->action(function (Model $record, array $data, $livewire): void {
+                static::launch(
+                    $livewire,
                     [$record->getKey()],
                     (int) $data['task_template_id'],
-                    extraVars: static::collectVars($data),
+                    static::collectVars($data),
                 );
             });
     }
@@ -71,43 +53,40 @@ class JobLauncher
         array $extraFields = [],
     ): BulkAction {
         return BulkAction::make($name)
-            ->label('Run')
+            ->label(__('laraansible::laraansible.run'))
             ->icon('heroicon-o-play')
             ->color('success')
-            ->modalHeading('Run Job on selected hosts')
-            ->modalSubmitActionLabel('Run')
+            ->modalHeading(__('laraansible::laraansible.run_job_on_selected'))
+            ->modalSubmitActionLabel(__('laraansible::laraansible.run'))
             ->schema(static::schema($extraFields))
-            ->action(function (Collection $records, array $data): void {
-                app(DeploymentService::class)->createWithInventoryIds(
+            ->action(function (Collection $records, array $data, $livewire): void {
+                static::launch(
+                    $livewire,
                     $records->pluck($records->first()->getKeyName())->all(),
                     (int) $data['task_template_id'],
-                    extraVars: static::collectVars($data),
+                    static::collectVars($data),
                 );
             })
             ->deselectRecordsAfterCompletion();
     }
 
     /**
-     * "Start New Ansible Job" action for a table row or edit-form record.
-     *
-     * Mirrors the OnGoingTasksPage "New Job" modal (Target Hosts + Task), but
-     * prefills Target Hosts with the inventory that matches the record's host —
-     * resolving (and, if missing, creating) it from the columns configured in
-     * AnsibleSetting.
+     * "Start New Ansible Job" action prefilled with the inventory matching the
+     * record's host, resolved (or created) from the AnsibleSetting columns.
      */
     public static function recordAction(string $name = 'run_ansible_task'): Action
     {
         return Action::make($name)
-            ->label(__('Run Ansible Task'))
+            ->label(__('laraansible::laraansible.run_ansible_task'))
             ->icon('heroicon-o-play')
             ->color('success')
-            ->modalHeading(__('Start New Ansible Job'))
+            ->modalHeading(__('laraansible::laraansible.start_new_ansible_job'))
             ->fillForm(fn (Model $record): array => [
                 'inventory_ids' => array_filter([static::resolveInventoryId($record)]),
             ])
             ->schema([
                 Forms\Components\Select::make('inventory_ids')
-                    ->label(__('Target Hosts'))
+                    ->label(__('laraansible::laraansible.target_hosts'))
                     ->options(fn (): array => Inventory::pluck('name', 'id')->all())
                     ->multiple()
                     ->searchable()
@@ -115,20 +94,38 @@ class JobLauncher
                     ->required(),
                 ...FormSchemaHelper::jobInputsSchema(),
             ])
-            ->action(function (array $data): void {
-                app(DeploymentService::class)->createWithInventoryIds(
+            ->action(function (array $data, $livewire): void {
+                static::launch(
+                    $livewire,
                     $data['inventory_ids'],
                     (int) $data['task_template_id'],
-                    extraVars: static::collectVars($data),
+                    static::collectVars($data),
                 );
             });
     }
 
     /**
-     * Resolve the inventory id for a record, reading its host/name columns from
-     * AnsibleSetting. Creates a single-host inventory on the fly when none maps
-     * to the record's IP yet.
+     * Launch a job, first giving the host component a chance to intercept when
+     * another active job already targets the same inventory (see
+     * HasInventoryConflictGuard).
+     *
+     * @param  array<int|string>  $inventoryIds
+     * @param  array<string, mixed>  $extraVars
      */
+    protected static function launch($livewire, array $inventoryIds, int $taskTemplateId, array $extraVars): void
+    {
+        if (method_exists($livewire, 'guardInventoryConflict')
+            && $livewire->guardInventoryConflict($inventoryIds, $taskTemplateId, $extraVars)) {
+            return;
+        }
+
+        app(DeploymentService::class)->createWithInventoryIds(
+            $inventoryIds,
+            $taskTemplateId,
+            extraVars: $extraVars,
+        );
+    }
+
     protected static function resolveInventoryId(Model $record): ?int
     {
         $setting = AnsibleSetting::getInstance();
@@ -153,9 +150,6 @@ class JobLauncher
         )->getKey();
     }
 
-    /**
-     * Job select + caller-supplied fields + the free-form variables editor.
-     */
     protected static function schema(array $extraFields): array
     {
         return array_merge(
@@ -164,10 +158,6 @@ class JobLauncher
         );
     }
 
-    /**
-     * Fold every submitted field (except the job select) into one variables map.
-     * The key/value editor and any typed extra field all become --extra-vars.
-     */
     protected static function collectVars(array $data): array
     {
         return FormSchemaHelper::collectInputVars($data);

@@ -3,21 +3,16 @@
 namespace VisioSoft\LaraAnsible\Services;
 
 use Filament\Notifications\Notification;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use VisioSoft\LaraAnsible\Jobs\ExecuteAnsibleDeployment;
 use VisioSoft\LaraAnsible\Models\Deployment;
-
+use VisioSoft\LaraAnsible\Models\Inventory;
+use VisioSoft\LaraAnsible\Models\TaskTemplate;
 
 class DeploymentService
 {
-    /**
-     * Create a deployment from an inventory group and dispatch the job.
-     */
-
-
-    /**
-     * Create a deployment with custom inventory IDs.
-     */
     public function createWithInventoryIds(
         array $inventoryIds,
         int $taskTemplateId,
@@ -25,30 +20,23 @@ class DeploymentService
         bool $notify = true,
         array $extraVars = []
     ): Deployment {
-        // Debug: Log input parameters
-        \Log::info("DeploymentService::createWithInventoryIds called");
-        \Log::info("Inventory IDs: ".json_encode($inventoryIds));
-        \Log::info("Task Template ID: {$taskTemplateId}");
-        \Log::info("User ID: ".($userId ?? auth()->id() ?? 'null'));
-
         $deployment = Deployment::create([
             'task_template_id' => $taskTemplateId,
             'user_id' => $userId ?? auth()->id(),
             'inventory_ids' => $inventoryIds,
+            'target_ip' => $this->resolveTargets($inventoryIds),
+            'playbook_name' => TaskTemplate::find($taskTemplateId)?->name,
             'extra_vars' => $extraVars ?: null,
             'status' => 'pending',
             'total_hosts' => count($inventoryIds),
         ]);
 
-        // Debug: Log created deployment
-        \Log::info("Created deployment: id={$deployment->id}, inventory_ids=".json_encode($deployment->inventory_ids));
-
         ExecuteAnsibleDeployment::dispatch($deployment);
 
         if ($notify) {
             Notification::make()
-                ->title('Görev Başlatıldı')
-                ->body(count($inventoryIds).' cihaz için görev kuyruğa alındı.')
+                ->title(__('laraansible::laraansible.job_started'))
+                ->body(__('laraansible::laraansible.job_queued_for_devices', ['count' => count($inventoryIds)]))
                 ->success()
                 ->send();
         }
@@ -57,21 +45,76 @@ class DeploymentService
     }
 
     /**
-     * Stop a running/pending deployment: kill its ansible-playbook process(es)
-     * on the controller and mark it failed. Matches on the run's unique playbook
-     * path, so it also clears duplicate/orphaned processes for the same run.
+     * Deduped, comma-joined list of every resolved target host across the
+     * selected inventories. Null if none.
+     *
+     * @param  array<int|string>  $inventoryIds
+     */
+    private function resolveTargets(array $inventoryIds): ?string
+    {
+        $ips = [];
+
+        foreach ($inventoryIds as $id) {
+            $inventory = Inventory::find($id);
+            if (! $inventory) {
+                continue;
+            }
+
+            $hosts = Inventory::normalizeHostsEntry($inventory->hosts_entry ?? []);
+
+            if (empty($hosts) && filled($inventory->hostname)) {
+                $hosts = [$inventory->hostname];
+            }
+
+            foreach ($hosts as $ip) {
+                if (filled($ip)) {
+                    $ips[] = (string) $ip;
+                }
+            }
+        }
+
+        $ips = array_values(array_unique($ips));
+
+        return empty($ips) ? null : implode(', ', $ips);
+    }
+
+    /**
+     * Active (pending/running) deployments sharing at least one inventory with
+     * the selection. Filtered in PHP: inventory_ids is a JSON array cast and
+     * the active set is tiny, so portable JSON-overlap SQL is not worth it.
+     *
+     * @param  array<int|string>  $inventoryIds
+     * @return Collection<int, Deployment>
+     */
+    public function runningConflicts(array $inventoryIds): Collection
+    {
+        $ids = array_map('intval', $inventoryIds);
+
+        if ($ids === []) {
+            return collect();
+        }
+
+        return Deployment::whereIn('status', ['pending', 'running'])
+            ->get()
+            ->filter(fn (Deployment $d): bool => array_intersect(
+                array_map('intval', $d->inventory_ids ?? []),
+                $ids
+            ) !== []);
+    }
+
+    /**
+     * Kill every ansible-playbook process of this run (matched on its unique
+     * "runs/<id>/playbook.yml" path) and mark the deployment failed.
      */
     public function cancel(Deployment $deployment): void
     {
         $id = (int) $deployment->id;
 
-        // The command line of every ansible process for this run contains
-        // ".../runs/<id>/playbook.yml" — kill them all (SIGTERM).
         $pattern = "runs/{$id}/playbook.yml";
         try {
             Process::run(['pkill', '-f', $pattern]);
         } catch (\Throwable $e) {
-            \Log::warning("cancel(): pkill failed for deployment {$id}: ".$e->getMessage());
+            Log::warning("cancel(): pkill failed for deployment {$id}: ".$e->getMessage());
         }
 
         $deployment->appendLog("\n\n=== Stopped by user ===\n");

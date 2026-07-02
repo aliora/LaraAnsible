@@ -13,29 +13,36 @@ class ExecuteAnsibleDeployment implements ShouldQueue
 {
     use InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * The number of seconds the job can run before timing out.
-     */
-    public int $timeout = 0; // No timeout
+    public int $timeout = 0;
 
     /**
-     * Create a new job instance.
+     * Single attempt — an ansible run must never be silently retried.
      */
+    public int $tries = 1;
+
     public function __construct(
         public Deployment $deployment
-    ) {}
+    ) {
+        $this->onConnection(config('laraansible.queue_connection'));
+        $this->onQueue(config('laraansible.queue'));
+    }
 
     /**
-     * Execute the job.
+     * Long playbooks outlive the queue connection's retry_after, so the worker
+     * would re-reserve the still-running job and fail it with "attempted too
+     * many times" mid-run. A time-based ceiling replaces the attempt-count
+     * check; the run is left alone until it exceeds this window.
      */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addHours(6);
+    }
+
     public function handle(AnsibleService $ansibleService): void
     {
         $ansibleService->executeDeployment($this->deployment);
     }
 
-    /**
-     * Handle a job failure.
-     */
     public function failed(\Throwable $exception): void
     {
         $this->deployment->appendLog("\n\n=== ERROR ===\n".$exception->getMessage()."\n");
@@ -44,7 +51,6 @@ class ExecuteAnsibleDeployment implements ShouldQueue
             'completed_at' => now(),
         ]);
 
-        // Remove any leftover run artifacts from the failed deployment.
         app(AnsibleService::class)->cleanup(
             storage_path('app/ansible/runs/'.$this->deployment->id)
         );

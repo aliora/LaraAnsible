@@ -13,7 +13,7 @@ return new class extends Migration
     {
         // Table name is 'inventories' based on 2025_11_14_165425_create_inventories_table.php
         Schema::table('inventories', function (Blueprint $table) {
-            if (!Schema::hasColumn('inventories', 'park_id')) {
+            if (! Schema::hasColumn('inventories', 'park_id')) {
                 // Assuming parks table exists in main app.
                 // We use bigInteger and unsigned to match standard id.
                 // We don't use constrained() immediately to avoid failure if 'parks' table is missing or named differently,
@@ -30,8 +30,8 @@ return new class extends Migration
     {
         Schema::table('inventories', function (Blueprint $table) {
             if (Schema::hasColumn('inventories', 'park_id')) {
-                 $table->dropForeign(['park_id']);
-                 $table->dropColumn('park_id');
+                $table->dropForeign(['park_id']);
+                $table->dropColumn('park_id');
             }
         });
     }

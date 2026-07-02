@@ -26,30 +26,42 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Support\Str;
+use VisioSoft\LaraAnsible\Filament\Concerns\AuthorizesAnsibleAccess;
+use VisioSoft\LaraAnsible\Helpers\TableHelper;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Keystore;
 
 class ManageAnsibleSettings extends Page implements HasForms, HasTable
 {
+    use AuthorizesAnsibleAccess;
     use InteractsWithFormActions;
     use InteractsWithForms;
     use InteractsWithTable;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
 
-    protected static string|\UnitEnum|null $navigationGroup = 'Ansible';
-
     protected static ?int $navigationSort = 99;
-
-    protected static ?string $navigationLabel = 'Ansible Settings';
-
-    protected static ?string $title = 'Ansible Settings';
 
     protected static ?string $slug = 'ansible/settings';
 
     protected string $view = 'laraansible::pages.manage-ansible-settings';
 
     public ?array $data = [];
+
+    public static function getNavigationGroup(): ?string
+    {
+        return __('laraansible::laraansible.nav_group');
+    }
+
+    public static function getNavigationLabel(): string
+    {
+        return __('laraansible::laraansible.ansible_settings');
+    }
+
+    public function getTitle(): string
+    {
+        return __('laraansible::laraansible.ansible_settings');
+    }
 
     public function mount(): void
     {
@@ -64,44 +76,44 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
         if ($isConfigured) {
             return $schema
                 ->schema([
-                    Section::make('Current Configuration')
-                        ->description('Your Ansible integration is active.')
+                    Section::make(__('laraansible::laraansible.current_configuration'))
+                        ->description(__('laraansible::laraansible.integration_active'))
                         ->icon('heroicon-o-check-circle')
                         ->iconColor('success')
                         ->schema([
                             Grid::make(2)
                                 ->schema([
                                     Forms\Components\TextInput::make('parent_table')
-                                        ->label('Group Source')
+                                        ->label(__('laraansible::laraansible.group_source'))
                                         ->prefixIcon('heroicon-o-folder')
                                         ->disabled(),
                                     Forms\Components\TextInput::make('child_table')
-                                        ->label('Device Source')
+                                        ->label(__('laraansible::laraansible.device_source'))
                                         ->prefixIcon('heroicon-o-server-stack')
                                         ->disabled(),
                                     Forms\Components\TextInput::make('ssh_username')
-                                        ->label('SSH User')
+                                        ->label(__('laraansible::laraansible.ssh_user'))
                                         ->prefixIcon('heroicon-o-user')
                                         ->disabled(),
                                     Forms\Components\TextInput::make('child_hostname_column')
-                                        ->label('IP/Hostname Column')
+                                        ->label(__('laraansible::laraansible.ip_hostname_column'))
                                         ->prefixIcon('heroicon-o-globe-alt')
                                         ->disabled(),
                                     Forms\Components\TextInput::make('version_column')
-                                        ->label('Version Column')
+                                        ->label(__('laraansible::laraansible.version_column'))
                                         ->prefixIcon('heroicon-o-tag')
-                                        ->placeholder('Not Configured')
+                                        ->placeholder(__('laraansible::laraansible.not_configured'))
                                         ->disabled(),
                                 ]),
 
                             Actions::make([
                                 SchemaAction::make('reset_settings')
-                                    ->label('Reset & Reconfigure')
+                                    ->label(__('laraansible::laraansible.reset_reconfigure'))
                                     ->icon('heroicon-o-arrow-path')
                                     ->color('danger')
                                     ->requiresConfirmation()
-                                    ->modalHeading('Reset Ansible Settings?')
-                                    ->modalDescription('This will clear your current table mappings. You will need to run the setup wizard again.')
+                                    ->modalHeading(__('laraansible::laraansible.reset_settings_heading'))
+                                    ->modalDescription(__('laraansible::laraansible.reset_settings_description'))
                                     ->action(function () use ($setting) {
                                         $setting->update([
                                             'parent_table' => null,
@@ -119,42 +131,42 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
             ->schema([
                 Wizard::make([
                     Wizard\Step::make('parent')
-                        ->label('1. Group Source')
-                        ->description('Select the main grouping table')
+                        ->label(__('laraansible::laraansible.step_group_source'))
+                        ->description(__('laraansible::laraansible.step_group_source_description'))
                         ->icon('heroicon-o-folder')
                         ->schema([
-                            Section::make('Main Table (Parent/Group)')
-                                ->description('The main table where devices are grouped. E.g., parks, locations, branches')
+                            Section::make(__('laraansible::laraansible.main_table_heading'))
+                                ->description(__('laraansible::laraansible.main_table_description'))
                                 ->schema([
                                     Forms\Components\Select::make('parent_table')
-                                        ->label('Table Name')
+                                        ->label(__('laraansible::laraansible.table_name'))
                                         ->options(fn () => AnsibleSetting::getAvailableTables())
                                         ->searchable()
                                         ->required()
                                         ->live()
                                         ->afterStateUpdated(fn (Set $set) => $set('parent_label_column', null))
-                                        ->helperText('Select the group/park table in your database'),
+                                        ->helperText(__('laraansible::laraansible.parent_table_help')),
 
                                     Forms\Components\Select::make('parent_label_column')
-                                        ->label('Display Column')
+                                        ->label(__('laraansible::laraansible.display_column'))
                                         ->options(fn (Get $get) => AnsibleSetting::getColumnsForTable($get('parent_table')))
                                         ->searchable()
                                         ->required()
-                                        ->helperText('Column to display in list (e.g. name, title)'),
+                                        ->helperText(__('laraansible::laraansible.display_column_help')),
                                 ])
                                 ->columns(2),
                         ]),
 
                     Wizard\Step::make('child')
-                        ->label('2. Device Source')
-                        ->description('Select the devices to be managed')
+                        ->label(__('laraansible::laraansible.step_device_source'))
+                        ->description(__('laraansible::laraansible.step_device_source_description'))
                         ->icon('heroicon-o-server-stack')
                         ->schema([
-                            Section::make('Device Table (Child/Devices)')
-                                ->description('The table containing devices managed by Ansible. E.g., devices, kiosks, servers')
+                            Section::make(__('laraansible::laraansible.device_table_heading'))
+                                ->description(__('laraansible::laraansible.device_table_description'))
                                 ->schema([
                                     Forms\Components\Select::make('child_table')
-                                        ->label('Table Name')
+                                        ->label(__('laraansible::laraansible.table_name'))
                                         ->options(fn () => AnsibleSetting::getAvailableTables())
                                         ->searchable()
                                         ->required()
@@ -167,62 +179,62 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
                                             $set('child_port_column', null);
                                             $set('child_username_column', null);
                                         })
-                                        ->helperText('Select the table where your devices are located'),
+                                        ->helperText(__('laraansible::laraansible.child_table_help')),
 
                                     Forms\Components\Select::make('child_parent_foreign_key')
-                                        ->label('Group Relationship Column (Foreign Key)')
+                                        ->label(__('laraansible::laraansible.group_foreign_key'))
                                         ->options(fn (Get $get) => AnsibleSetting::getColumnsForTable($get('child_table')))
                                         ->searchable()
                                         ->required()
-                                        ->helperText('Column linking to the parent table (e.g. park_id)'),
+                                        ->helperText(__('laraansible::laraansible.group_foreign_key_help')),
                                 ])
                                 ->columns(2),
 
-                            Fieldset::make('Device Details')
+                            Fieldset::make(__('laraansible::laraansible.device_details'))
                                 ->schema([
                                     Forms\Components\Select::make('child_label_column')
-                                        ->label('Device Name Column')
+                                        ->label(__('laraansible::laraansible.device_name_column'))
                                         ->options(fn (Get $get) => AnsibleSetting::getColumnsForTable($get('child_table')))
                                         ->searchable()
                                         ->required()
-                                        ->helperText('Display name of the device'),
+                                        ->helperText(__('laraansible::laraansible.device_name_column_help')),
 
                                     Forms\Components\Select::make('version_column')
-                                        ->label('Version Column')
+                                        ->label(__('laraansible::laraansible.version_column'))
                                         ->options(fn (Get $get) => AnsibleSetting::getColumnsForTable($get('child_table')))
                                         ->searchable()
-                                        ->placeholder('Optional')
-                                        ->helperText('If software version is tracked'),
+                                        ->placeholder(__('laraansible::laraansible.optional'))
+                                        ->helperText(__('laraansible::laraansible.version_column_help')),
                                 ])
                                 ->columns(2),
                         ]),
 
                     Wizard\Step::make('connection')
-                        ->label('3. Connection Settings')
-                        ->description('Map SSH connection details')
+                        ->label(__('laraansible::laraansible.step_connection'))
+                        ->description(__('laraansible::laraansible.step_connection_description'))
                         ->icon('heroicon-o-link')
                         ->schema([
-                            Section::make('SSH Connection Settings')
-                                ->description('Information used by Ansible to connect to devices')
+                            Section::make(__('laraansible::laraansible.ssh_connection_settings'))
+                                ->description(__('laraansible::laraansible.ssh_connection_settings_description'))
                                 ->schema([
                                     Forms\Components\Select::make('child_hostname_column')
-                                        ->label('IP/Hostname Column')
+                                        ->label(__('laraansible::laraansible.ip_hostname_column'))
                                         ->options(fn (Get $get) => AnsibleSetting::getColumnsForTable($get('child_table')))
                                         ->searchable()
                                         ->required()
-                                        ->helperText('Column containing device IP address or hostname'),
+                                        ->helperText(__('laraansible::laraansible.ip_hostname_column_help')),
 
                                     Forms\Components\TextInput::make('ssh_port')
-                                        ->label('SSH Port')
+                                        ->label(__('laraansible::laraansible.ssh_port'))
                                         ->default('22')
                                         ->placeholder('22')
-                                        ->helperText('Default SSH port for all devices'),
+                                        ->helperText(__('laraansible::laraansible.ssh_port_help')),
 
                                     Forms\Components\TextInput::make('ssh_username')
-                                        ->label('SSH Username')
+                                        ->label(__('laraansible::laraansible.ssh_username'))
                                         ->default('root')
                                         ->placeholder('root')
-                                        ->helperText('Default SSH username for all devices'),
+                                        ->helperText(__('laraansible::laraansible.ssh_username_help')),
                                 ])
                                 ->columns(3),
                         ]),
@@ -234,49 +246,50 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
 
     public function table(Table $table): Table
     {
-        return $table
+        return TableHelper::configure($table)
             ->query(Keystore::query()->orderBy('name'))
-            ->heading('SSH Keys')
-            ->description('SSH private keys Ansible uses to connect to devices.')
+            ->heading(__('laraansible::laraansible.ssh_keys'))
+            ->description(__('laraansible::laraansible.ssh_keys_description'))
             ->columns([
                 Tables\Columns\TextColumn::make('name')
-                    ->label('Key Name')
+                    ->label(__('laraansible::laraansible.key_name'))
                     ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('private_key')
-                    ->label('Key')
+                    ->label(__('laraansible::laraansible.key'))
                     ->formatStateUsing(fn (?string $state): string => Str::limit(preg_replace('/\s+/', ' ', (string) $state), 50) ?: '—')
                     ->color('gray'),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->label('Added')
+                    ->label(__('laraansible::laraansible.added'))
                     ->dateTime('d.m.Y H:i')
                     ->sortable(),
             ])
             ->headerActions([
                 CreateAction::make()
-                    ->label('Add SSH Key')
-                    ->modalHeading('Add SSH Key')
+                    ->label(__('laraansible::laraansible.add_ssh_key'))
+                    ->modalHeading(__('laraansible::laraansible.add_ssh_key'))
                     ->schema($this->keystoreFormSchema()),
             ])
-            ->actions([
+            ->actions(TableHelper::actionGroup([
                 EditAction::make()
-                    ->modalHeading('Edit SSH Key')
+                    ->modalHeading(__('laraansible::laraansible.edit_ssh_key'))
                     ->schema($this->keystoreFormSchema()),
                 DeleteAction::make()
                     ->before(function (Keystore $record, DeleteAction $action) {
                         if ($record->inventories()->exists()) {
                             Notification::make()
                                 ->warning()
-                                ->title('Key in use')
-                                ->body('This key is assigned to an inventory and cannot be deleted.')
+                                ->title(__('laraansible::laraansible.key_in_use'))
+                                ->body(__('laraansible::laraansible.key_in_use_body'))
                                 ->send();
 
                             $action->cancel();
                         }
                     }),
-            ])
-            ->emptyStateHeading('No SSH keys yet')
-            ->emptyStateDescription('Add a key Ansible will use to connect to devices.')
+            ]))
+            ->bulkActions(TableHelper::bulkActions())
+            ->emptyStateHeading(__('laraansible::laraansible.no_ssh_keys'))
+            ->emptyStateDescription(__('laraansible::laraansible.no_ssh_keys_description'))
             ->emptyStateIcon('heroicon-o-key');
     }
 
@@ -284,11 +297,11 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
     {
         return [
             Forms\Components\TextInput::make('name')
-                ->label('Key Name')
+                ->label(__('laraansible::laraansible.key_name'))
                 ->required()
                 ->placeholder('e.g. gate-prod'),
             Forms\Components\Textarea::make('private_key')
-                ->label('Private Key (PEM)')
+                ->label(__('laraansible::laraansible.private_key_pem'))
                 ->required()
                 ->rows(6)
                 ->placeholder('-----BEGIN OPENSSH PRIVATE KEY-----'),
@@ -299,7 +312,7 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
     {
         return [
             Action::make('save')
-                ->label('Save Settings')
+                ->label(__('laraansible::laraansible.save_settings'))
                 ->icon('heroicon-o-check')
                 ->color('success')
                 ->submit('save'),
@@ -311,8 +324,8 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
         AnsibleSetting::getInstance()->update($this->form->getState());
 
         Notification::make()
-            ->title('Settings Saved')
-            ->body('Ansible integration settings updated successfully.')
+            ->title(__('laraansible::laraansible.settings_saved'))
+            ->body(__('laraansible::laraansible.settings_saved_body'))
             ->success()
             ->send();
     }

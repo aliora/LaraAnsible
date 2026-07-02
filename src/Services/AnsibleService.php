@@ -5,25 +5,17 @@ namespace VisioSoft\LaraAnsible\Services;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
+use Symfony\Component\Process\ExecutableFinder;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
+use VisioSoft\LaraAnsible\Models\AnsibleTemplate;
 use VisioSoft\LaraAnsible\Models\Deployment;
 use VisioSoft\LaraAnsible\Models\Inventory;
 use VisioSoft\LaraAnsible\Models\Keystore;
 
 class AnsibleService
 {
-    /**
-     * Absolute path to the current deployment's isolated run directory.
-     */
     protected string $runDir = '';
 
-    /**
-     * Build (and ensure) the isolated run directory for a deployment.
-     *
-     * All artifacts for a single run live under this one directory:
-     * inventory.ini, playbook.yml, tasks/, templates/, keys/. The whole
-     * directory is removed as a unit once the run finishes.
-     */
     protected function runDir(Deployment $deployment): string
     {
         $dir = storage_path('app/ansible/runs/'.$deployment->id);
@@ -34,11 +26,15 @@ class AnsibleService
         return $dir;
     }
 
-    /**
-     * Execute an Ansible deployment
-     */
     public function executeDeployment(Deployment $deployment): void
     {
+        $deployment->refresh();
+        if ($deployment->status === 'failed') {
+            Log::info("Skipping deployment {$deployment->id}: already cancelled before pickup.");
+
+            return;
+        }
+
         $deployment->update([
             'status' => 'running',
             'started_at' => now(),
@@ -49,7 +45,8 @@ class AnsibleService
         try {
             Log::info("Starting deployment {$deployment->id}");
 
-            // Create temporary files
+            $this->assertAnsibleBinaryAvailable();
+
             $inventoryData = $this->createInventoryFile($deployment);
             $inventoryPath = $inventoryData['path'];
             $totalHostsCount = $inventoryData['host_count'];
@@ -58,23 +55,18 @@ class AnsibleService
             $playbookPath = $this->createPlaybookFile($deployment);
             Log::info("Created playbook file: {$playbookPath}");
 
-            // Create templates directory and files
             $this->createTemplateFiles($deployment, $playbookPath);
             Log::info('Created template files');
 
-            // Copy the shared file library (tasks/templates a job can reference)
             $this->createSharedLibraryFiles($playbookPath);
+            $this->createDbLibraryFiles($playbookPath);
 
-            // Build ansible-playbook command
             $commandData = $this->buildAnsibleCommand($deployment, $inventoryPath, $playbookPath);
             Log::info("Command to execute: {$commandData['display_command']}");
 
-            // Get total tasks count
-            $totalPlaybookTasks = $this->getTotalTasks($deployment, $inventoryPath, $playbookPath);
-            $totalTasks = max(1, $totalPlaybookTasks);
+            $totalTasks = max(1, $this->getTotalTasks($deployment, $inventoryPath, $playbookPath));
             Log::info("Total playbook tasks: {$totalTasks}");
 
-            // Store command input before execution
             $commandInput = "=== Command ===\n";
             $commandInput .= $commandData['display_command']."\n\n";
             $commandInput .= "=== Inventory File ({$inventoryPath}) ===\n";
@@ -82,37 +74,28 @@ class AnsibleService
             $commandInput .= "=== Playbook File ({$playbookPath}) ===\n";
             $commandInput .= file_get_contents($playbookPath);
 
-            // Logs live in a file (storage/logs/ansible-playbook/<id>.log), not the DB.
             $deployment->writeLog($commandInput."\n\n=== Ansible Output ===\n");
 
             $deployment->update([
                 'command_input' => $commandInput,
-                // Use total_hosts/processed_hosts to track task progress (X/Y) in the UI.
                 'total_hosts' => $totalTasks,
                 'processed_hosts' => 0,
             ]);
 
-            // Execute the command with streaming output
             $outputBuffer = '';
-            $completedTasks = 0;
-            $totalTasks = max(1, $totalTasks);
 
-            // Use an unlimited timeout to allow long-running Ansible playbooks
             $result = Process::forever()
                 ->env([
                     'PYTHONUNBUFFERED' => '1',
                     'ANSIBLE_STDOUT_CALLBACK' => 'default',
+                    'ANSIBLE_HOST_KEY_CHECKING' => config('laraansible.host_key_checking') ? 'True' : 'False',
+                    'ANSIBLE_PIPELINING' => 'True',
                 ])
-                ->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, &$completedTasks, $totalTasks, $deployment) {
+                ->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, $totalTasks, $deployment) {
                     $outputBuffer .= $output;
 
-                    // Stream this chunk straight to the log file (no DB output bloat).
                     $deployment->appendLog($output);
 
-                    // Parse Ansible output to track progress
-
-                    // Count tasks in the accumulated output buffer.
-                    // TASK lines are emitted once per task (not per host).
                     $cleanOutput = preg_replace('/\x1b\[[0-9;]*m/', '', $outputBuffer);
                     $completedTasks = 0;
                     if (preg_match_all('/^\s*TASK \[.*\]/m', $cleanOutput, $matches)) {
@@ -120,20 +103,13 @@ class AnsibleService
                     }
 
                     $processedTasks = min($completedTasks, $totalTasks);
+                    $progress = min(100, (int) round(($processedTasks / $totalTasks) * 100));
 
-                    // Calculate progress percentage based on TASKS
-                    $progress = 0;
-                    if ($totalTasks > 0) {
-                        $progress = min(100, (int) round(($processedTasks / $totalTasks) * 100));
-                    }
-
-                    // If we see PLAY RECAP, we're likely done or close to it.
                     if (str_contains($cleanOutput, 'PLAY RECAP')) {
                         $progress = 100;
                         $processedTasks = $totalTasks;
                     }
 
-                    // Update deployment with progress only (output goes to the log file).
                     $deployment->update([
                         'progress' => $progress,
                         'processed_hosts' => $processedTasks,
@@ -142,13 +118,11 @@ class AnsibleService
 
             Log::info("Command executed with exit code: {$result->exitCode()}");
 
-            // Final status update (full output already streamed to the log file).
-            $finalOutput = $result->output();
             $deployment->update([
-                'status' => $this->resolveDeploymentStatus($finalOutput, $result->exitCode()),
+                'status' => $this->resolveDeploymentStatus($result->output(), $result->exitCode()),
                 'exit_code' => $result->exitCode(),
                 'completed_at' => now(),
-                'progress' => 100, // Ensure it's 100 on completion
+                'progress' => 100,
             ]);
 
             if (! $result->successful()) {
@@ -173,32 +147,58 @@ class AnsibleService
 
             throw $e;
         } finally {
-            // Always remove the whole run directory — success, failure, or exception.
             $this->cleanup($this->runDir);
         }
     }
 
+    protected function assertAnsibleBinaryAvailable(): void
+    {
+        $binary = (string) config('laraansible.ansible_binary', 'ansible-playbook');
+
+        $resolved = str_contains($binary, '/')
+            ? (is_executable($binary) ? $binary : null)
+            : (new ExecutableFinder)->find($binary);
+
+        if (! $resolved) {
+            throw new \RuntimeException(
+                "ansible binary '{$binary}' not found. Install ansible on the worker host ".
+                'or set laraansible.ansible_binary (LARA_ANSIBLE_BINARY) to its absolute path.'
+            );
+        }
+    }
+
     /**
-     * Create temporary inventory file or use existing inventory file
-     * Returns array with 'path' and 'host_count'
+     * Resolve a user-supplied inventory_file to a real path, returning null for
+     * missing files or anything outside storage/app/ansible (path-traversal guard).
+     */
+    protected function resolveAllowedInventoryPath(string $path): ?string
+    {
+        $real = realpath($path);
+        if ($real === false) {
+            return null;
+        }
+
+        $root = realpath(storage_path('app/ansible')) ?: storage_path('app/ansible');
+
+        return str_starts_with($real, rtrim($root, '/').'/') ? $real : null;
+    }
+
+    /**
+     * @return array{path: string, host_count: int}
      */
     protected function createInventoryFile(Deployment $deployment): array
     {
-        // Debug: Log deployment info
-        Log::info("Creating inventory for deployment {$deployment->id}");
-        Log::info('Deployment inventory_ids: '.json_encode($deployment->inventory_ids));
-        Log::info('Deployment inventory_file: '.($deployment->inventory_file ?? 'null'));
+        if ($deployment->inventory_file) {
+            $safePath = $this->resolveAllowedInventoryPath($deployment->inventory_file);
+            if ($safePath === null) {
+                throw new \RuntimeException('Refusing inventory_file outside the ansible storage dir: '.$deployment->inventory_file);
+            }
 
-        // If an inventory file is specified, use it directly
-        // If an inventory file is specified, use it directly (assume 1 host or we count later? Difficult without parsing)
-        // For custom inventory files, we might just have to scan it or default to 1 count logic if not parsed.
-        // Let's try to count lines with "ansible_host" as a heuristic for custom files too.
-        if ($deployment->inventory_file && file_exists($deployment->inventory_file)) {
-            $content = file_get_contents($deployment->inventory_file);
-            $count = substr_count($content, 'ansible_host='); // Basic heuristic
+            $content = file_get_contents($safePath);
+            $count = substr_count($content, 'ansible_host=');
 
             return [
-                'path' => $deployment->inventory_file,
+                'path' => $safePath,
                 'host_count' => max(1, $count),
             ];
         }
@@ -207,15 +207,9 @@ class AnsibleService
         $staticInventoryIds = [];
         $dynamicInventoryIds = [];
 
-        // Separate static and dynamic IDs
         foreach ($inventoryIds as $id) {
             if ($id === 'all') {
                 $staticInventoryIds = ['all'];
-                // For dynamic, we need to fetch all from settings if 'all' is supported there,
-                // but currently 'all' usually means all static servers.
-                // Let's assume 'all' only applies to static for backward compatibility or handle it if needed.
-                // For now, if 'all' is selected, we get all static.
-                // If users want all dynamic, they can select all groups.
                 break;
             }
 
@@ -228,7 +222,6 @@ class AnsibleService
 
         $inventories = collect();
 
-        // 1. Handle Static Inventories
         if (! empty($staticInventoryIds)) {
             if (in_array('all', $staticInventoryIds)) {
                 $inventories = Inventory::where('is_active', true)->get();
@@ -237,45 +230,27 @@ class AnsibleService
             }
         }
 
-        // Debug: Log inventory query results
-        Log::info('Static Inventory IDs: '.json_encode($staticInventoryIds));
-        Log::info('Dynamic Inventory IDs: '.json_encode($dynamicInventoryIds));
-        Log::info('Inventories found: '.$inventories->count());
-        foreach ($inventories as $inv) {
-            Log::info("Inventory: id={$inv->id}, name={$inv->name}, hostname={$inv->hostname}, is_active={$inv->is_active}");
-        }
-
-        // 2. Handle Dynamic Inventories
         if (! empty($dynamicInventoryIds)) {
             $setting = AnsibleSetting::getActive();
             if ($setting && $setting->child_table) {
                 foreach ($dynamicInventoryIds as $dynamicId) {
-                    // key format: dynamic_{child_id}_{hostname}
-                    // We only need child_id to look up the record again to be safe and get fresh data
                     $parts = explode('_', $dynamicId);
-                    if (count($parts) >= 3) {
-                        $childId = $parts[1];
+                    if (count($parts) < 3) {
+                        continue;
+                    }
 
-                        try {
-                            $child = \DB::table($setting->child_table)->find($childId);
-                            if ($child) {
-                                // Create a temporary Inventory object or array structure
-                                $inventory = new Inventory;
-                                $inventory->hostname = $child->{$setting->child_hostname_column} ?? null;
-                                // Use direct SSH settings
-                                $inventory->port = $setting->ssh_port ?? 22;
-                                $inventory->username = $setting->ssh_username ?? 'root';
+                    $child = $setting->findChild($parts[1]);
+                    if (! $child) {
+                        continue;
+                    }
 
-                                // Dynamic items don't have a keystore relation unless we add logic for it.
-                                // For now, we assume they rely on SSH agent, passwordless access, or provided arguments.
+                    $inventory = new Inventory;
+                    $inventory->hostname = $child->{$setting->child_hostname_column} ?? null;
+                    $inventory->port = $setting->ssh_port ?? 22;
+                    $inventory->username = $setting->ssh_username ?? 'root';
 
-                                if ($inventory->hostname) {
-                                    $inventories->push($inventory);
-                                }
-                            }
-                        } catch (\Exception $e) {
-                            Log::warning("AnsibleService: Failed to fetch dynamic inventory item {$dynamicId}: ".$e->getMessage());
-                        }
+                    if ($inventory->hostname) {
+                        $inventories->push($inventory);
                     }
                 }
             }
@@ -284,77 +259,47 @@ class AnsibleService
         $content = '';
         $setting = AnsibleSetting::getInstance();
 
-        Log::info('CODE VERSION: 2025-01-18-18:00 - BEFORE GROUPING');
-
-        // Track all hostnames for the [all] group
         $allHosts = [];
-
-        // Group inventories by parent
         $groupedInventories = [];
         $ungroupedInventories = [];
 
         foreach ($inventories as $inventory) {
-            if ($inventory->source_type === 'dynamic' && $inventory->dynamic_child_id && $setting && $setting->child_table) {
-                try {
-                    $foreignKey = $setting->child_parent_foreign_key ?? 'parent_id';
-                    $child = \DB::table($setting->child_table)->find($inventory->dynamic_child_id);
+            if ($inventory->source_type !== 'dynamic' || ! $inventory->dynamic_child_id || ! $setting || ! $setting->child_table) {
+                $ungroupedInventories[] = $inventory;
 
-                    if ($child && isset($child->{$foreignKey})) {
-                        $parentId = $child->{$foreignKey};
+                continue;
+            }
 
-                        if ($setting->parent_table) {
-                            $parent = \DB::table($setting->parent_table)->find($parentId);
-                            $groupName = $parent ? ($parent->{$setting->parent_label_column ?? 'name'} ?? 'unknown') : 'unknown';
+            $child = $setting->findChild($inventory->dynamic_child_id);
+            $foreignKey = $setting->childForeignKey();
 
-                            // Sanitize group name for Ansible (Turkish-aware)
-                            $groupName = strtolower(Inventory::ansibleGroupName($groupName));
+            if ($child && isset($child->{$foreignKey}) && $setting->parent_table) {
+                $groupName = $setting->parentLabelFor($child->{$foreignKey}) ?? 'unknown';
+                $groupName = strtolower(Inventory::ansibleGroupName($groupName));
 
-                            if (! isset($groupedInventories[$groupName])) {
-                                $groupedInventories[$groupName] = [];
-                            }
-
-                            $groupedInventories[$groupName][] = $inventory;
-                        } else {
-                            $ungroupedInventories[] = $inventory;
-                        }
-                    } else {
-                        $ungroupedInventories[] = $inventory;
-                    }
-                } catch (\Exception $e) {
-                    Log::warning("Failed to group inventory {$inventory->id}: ".$e->getMessage());
-                    $ungroupedInventories[] = $inventory;
-                }
+                $groupedInventories[$groupName][] = $inventory;
             } else {
                 $ungroupedInventories[] = $inventory;
             }
         }
 
-        // Build inventory content with groups
-        Log::info('Building grouped inventories. Count: '.count($groupedInventories));
         foreach ($groupedInventories as $groupName => $groupInventories) {
-            Log::info("Processing group: {$groupName}, inventories count: ".count($groupInventories));
             $content .= "[{$groupName}]\n";
-            Log::info('Content after group header: '.json_encode($content));
 
-            $groupVars = [];
             $groupKeystores = [];
             $groupUsers = [];
             $groupPorts = [];
 
             foreach ($groupInventories as $inventory) {
-                Log::info("Processing inventory in group: id={$inventory->id}, hostname={$inventory->hostname}");
                 $hostsEntry = Inventory::normalizeHostsEntry($inventory->hosts_entry ?? []);
                 if (empty($hostsEntry) && ! empty($inventory->hostname)) {
                     $hostsEntry = [$inventory->name ?? $inventory->hostname => $inventory->hostname];
                 }
 
                 if (empty($hostsEntry)) {
-                    Log::info('Skipping inventory with empty hostname');
-
                     continue;
                 }
 
-                // Collect all unique values for group vars
                 if ($inventory->username) {
                     $groupUsers[$inventory->username] = true;
                 }
@@ -374,42 +319,27 @@ class AnsibleService
                     }
 
                     $hostLine = "{$alias} ansible_host={$hostIp}";
-
-                    // Track for [all] group
                     $allHosts[] = $hostLine;
-
                     $content .= $hostLine."\n";
-                    Log::info('Content after adding host: '.json_encode(substr($content, -200)));
                 }
             }
 
-            Log::info("Finished processing group {$groupName}, content length: ".strlen($content));
-
-            // Add group vars section
-            $hasGroupVars = false;
             $groupVarsContent = '';
 
-            // If all hosts use same user, set as group var
             if (count($groupUsers) === 1) {
                 $groupVarsContent .= 'ansible_user='.array_key_first($groupUsers)."\n";
-                $hasGroupVars = true;
             }
 
-            // If all hosts use same port, set as group var
             if (count($groupPorts) === 1) {
                 $groupVarsContent .= 'ansible_port='.array_key_first($groupPorts)."\n";
-                $hasGroupVars = true;
             }
 
-            // If all hosts use same keystore, set as group var
             if (count($groupKeystores) === 1) {
-                $keystore = reset($groupKeystores);
-                $keystorePath = $this->createTempKeyFile($keystore);
+                $keystorePath = $this->createTempKeyFile(reset($groupKeystores));
                 $groupVarsContent .= "ansible_ssh_private_key_file={$keystorePath}\n";
-                $hasGroupVars = true;
             }
 
-            if ($hasGroupVars) {
+            if ($groupVarsContent !== '') {
                 $content .= "[{$groupName}:vars]\n";
                 $content .= $groupVarsContent;
             }
@@ -417,17 +347,11 @@ class AnsibleService
             $content .= "\n";
         }
 
-        // Add ungrouped inventories
-        Log::info('Building ungrouped inventories. Count: '.count($ungroupedInventories));
         if (! empty($ungroupedInventories)) {
             $content .= "[ungrouped]\n";
 
             foreach ($ungroupedInventories as $inventory) {
-                Log::info("Processing ungrouped inventory: id={$inventory->id}, hostname={$inventory->hostname}, script=".(! empty($inventory->script) ? 'YES' : 'NO'));
-
-                // Handle script-based inventories
                 if (! empty($inventory->script) && $inventory->source_type !== 'dynamic') {
-                    Log::info('Processing script-based inventory');
                     foreach ($this->extractHostLinesFromInventoryScript($inventory->script) as $hostLine) {
                         $allHosts[] = $hostLine;
                         $content .= $hostLine."\n";
@@ -463,18 +387,14 @@ class AnsibleService
                         $line .= " ansible_ssh_private_key_file={$keyPath}";
                     }
 
-                    // Track for [all] group
                     $allHosts[] = $line;
-
                     $content .= $line."\n";
-                    Log::info('Added ungrouped host, content length now: '.strlen($content));
                 }
             }
 
             $content .= "\n";
         }
 
-        // Append script-based inventories at the end
         foreach ($inventories as $inventory) {
             if (! empty($inventory->script) && $inventory->source_type !== 'dynamic') {
                 $content .= $inventory->script."\n";
@@ -485,19 +405,15 @@ class AnsibleService
             }
         }
 
-        // Prepend [gate_server] and [all] groups at the beginning if we have hosts
         if (! empty($allHosts)) {
-            // Remove duplicates
             $allHosts = array_unique($allHosts);
 
-            // Create [gate_server] group with all hosts directly
             $gateServerContent = "[gate_server]\n";
             foreach ($allHosts as $hostLine) {
                 $gateServerContent .= $hostLine."\n";
             }
             $gateServerContent .= "\n";
 
-            // Also create [all] group for compatibility
             $allGroupContent = "[all]\n";
             foreach ($allHosts as $hostLine) {
                 $allGroupContent .= $hostLine."\n";
@@ -510,11 +426,6 @@ class AnsibleService
         $path = $this->runDir.'/inventory.ini';
         file_put_contents($path, $content);
 
-        // Debug: Log inventory content
-        Log::info("Inventory file created at: {$path}");
-        Log::info("Inventory content:\n{$content}");
-        Log::info('Total hosts collected: '.count($allHosts));
-
         return [
             'path' => $path,
             'host_count' => count($allHosts),
@@ -522,52 +433,8 @@ class AnsibleService
     }
 
     /**
-     * Extract host entries from an inventory script.
-     *
      * @return array<int, string>
      */
-    protected function extractHostsFromInventoryScript(string $script): array
-    {
-        $hosts = [];
-        $currentSection = 'hosts';
-        $lines = preg_split("/\r\n|\n|\r/", $script) ?: [];
-
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line === '' || str_starts_with($line, '#') || str_starts_with($line, ';')) {
-                continue;
-            }
-
-            if (preg_match('/^\[(.*?)\]$/', $line, $matches)) {
-                $header = strtolower($matches[1]);
-                if (str_contains($header, ':vars')) {
-                    $currentSection = 'vars';
-                } elseif (str_contains($header, ':children')) {
-                    $currentSection = 'children';
-                } else {
-                    $currentSection = 'hosts';
-                }
-
-                continue;
-            }
-
-            if ($currentSection !== 'hosts') {
-                continue;
-            }
-
-            $parts = preg_split('/\s+/', $line);
-            $first = $parts[0] ?? '';
-
-            if ($first === '' || str_contains($first, '=')) {
-                continue;
-            }
-
-            $hosts[] = $first;
-        }
-
-        return $hosts;
-    }
-
     protected function extractHostLinesFromInventoryScript(string $script): array
     {
         $hostLines = [];
@@ -604,20 +471,12 @@ class AnsibleService
                 continue;
             }
 
-            // Return the full line if it contains ansible_host
-            if (str_contains($line, 'ansible_host=')) {
-                $hostLines[] = $line;
-            } else {
-                $hostLines[] = $first;
-            }
+            $hostLines[] = str_contains($line, 'ansible_host=') ? $line : $first;
         }
 
         return $hostLines;
     }
 
-    /**
-     * Create temporary playbook file
-     */
     protected function createPlaybookFile(Deployment $deployment): string
     {
         $taskTemplate = $deployment->taskTemplate;
@@ -638,9 +497,6 @@ class AnsibleService
         return $path;
     }
 
-    /**
-     * Create template files from AnsibleTemplate model
-     */
     protected function createTemplateFiles(Deployment $deployment, string $playbookPath): void
     {
         $templates = $deployment->taskTemplate->templates ?? [];
@@ -649,8 +505,7 @@ class AnsibleService
             return;
         }
 
-        $playbookDir = dirname($playbookPath);
-        $templatesDir = $playbookDir.'/templates';
+        $templatesDir = dirname($playbookPath).'/templates';
 
         if (! is_dir($templatesDir)) {
             mkdir($templatesDir, 0755, true);
@@ -663,12 +518,8 @@ class AnsibleService
     }
 
     /**
-     * Copy the shared file library into the run directory so any job can reference
-     * common tasks/templates without re-declaring them. Drop files in
-     * storage/app/ansible/library/ and route them by extension:
-     *   - .yml / .yaml -> tasks/<name> (+ flat root)   (import_tasks: tasks/<name> | <name>)
-     *   - anything else -> templates/<name> + files/<name> (+ flat root)
-     *                                                  (template/copy: src=templates|files/<name> | <name>)
+     * Copy storage/app/ansible/library/ into the run directory, routed by
+     * extension, so any job can reference shared tasks/templates by name.
      */
     protected function createSharedLibraryFiles(string $playbookPath): void
     {
@@ -686,38 +537,74 @@ class AnsibleService
         $base = dirname($playbookPath);
         $reserved = ['playbook.yml', 'inventory.ini'];
 
-        foreach (['tasks', 'templates', 'files'] as $dir) {
-            if (! is_dir($base.'/'.$dir)) {
-                mkdir($base.'/'.$dir, 0755, true);
-            }
-        }
+        $this->ensureLibraryDirs($base);
 
         foreach ($files as $file) {
             if (! is_file($file)) {
                 continue;
             }
 
-            $name = basename($file);
-            $content = file_get_contents($file);
-            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            $this->writeLibraryFile($base, basename($file), file_get_contents($file), $reserved);
+        }
+    }
 
-            // Flat copy at the run root so a bare (prefix-less) reference resolves too.
-            if (! in_array($name, $reserved, true)) {
-                file_put_contents($base.'/'.$name, $content);
+    /**
+     * Materialize active AnsibleTemplate records into the run directory, routed
+     * by extension exactly like the filesystem library.
+     */
+    protected function createDbLibraryFiles(string $playbookPath): void
+    {
+        $templates = AnsibleTemplate::query()
+            ->where('is_active', true)
+            ->get(['name', 'content']);
+
+        if ($templates->isEmpty()) {
+            return;
+        }
+
+        $base = dirname($playbookPath);
+        $reserved = ['playbook.yml', 'inventory.ini'];
+
+        $this->ensureLibraryDirs($base);
+
+        foreach ($templates as $template) {
+            if (blank($template->name)) {
+                continue;
             }
 
-            if (in_array($ext, ['yml', 'yaml'], true)) {
-                file_put_contents($base.'/tasks/'.$name, $content);
-            } else {
-                file_put_contents($base.'/templates/'.$name, $content);
-                file_put_contents($base.'/files/'.$name, $content);
+            $this->writeLibraryFile($base, basename($template->name), (string) $template->content, $reserved);
+        }
+    }
+
+    protected function ensureLibraryDirs(string $base): void
+    {
+        foreach (['tasks', 'templates', 'files'] as $dir) {
+            if (! is_dir($base.'/'.$dir)) {
+                mkdir($base.'/'.$dir, 0755, true);
             }
         }
     }
 
     /**
-     * Create temporary SSH key file
+     * Route one library file into the run dir: .yml/.yaml to tasks/, everything
+     * else to templates/ and files/, plus a flat root copy for bare references.
      */
+    protected function writeLibraryFile(string $base, string $name, string $content, array $reserved): void
+    {
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+
+        if (! in_array($name, $reserved, true)) {
+            file_put_contents($base.'/'.$name, $content);
+        }
+
+        if (in_array($ext, ['yml', 'yaml'], true)) {
+            file_put_contents($base.'/tasks/'.$name, $content);
+        } else {
+            file_put_contents($base.'/templates/'.$name, $content);
+            file_put_contents($base.'/files/'.$name, $content);
+        }
+    }
+
     protected function createTempKeyFile(Keystore $keystore): string
     {
         $path = $this->runDir.'/keys/key_'.$keystore->id;
@@ -732,11 +619,8 @@ class AnsibleService
     }
 
     /**
-     * Build Ansible command
-     */
-    /**
-     * Merge the job's default extra_vars with the per-run values collected at launch.
-     * Per-run values (from the launch button) win over task-template defaults.
+     * Merge the job's default extra_vars with the per-run values collected at
+     * launch; per-run values win.
      */
     protected function resolveExtraVars(Deployment $deployment): array
     {
@@ -751,57 +635,57 @@ class AnsibleService
         return $vars;
     }
 
+    /**
+     * @return array{display_command: string, wrapped_command: string}
+     */
     protected function buildAnsibleCommand(Deployment $deployment, string $inventoryPath, string $playbookPath): array
     {
-        // Build base ansible-playbook command with correct order
-        $command = "ansible-playbook -i {$inventoryPath} {$playbookPath}";
+        $binary = config('laraansible.ansible_binary', 'ansible-playbook');
+        $command = escapeshellcmd($binary).' -i '.escapeshellarg($inventoryPath).' '.escapeshellarg($playbookPath);
 
-        // Add extra vars: task-template defaults overridden by per-run (launch button) values
         $extraVars = $this->resolveExtraVars($deployment);
         if (! empty($extraVars)) {
             $command .= ' --extra-vars '.escapeshellarg(json_encode($extraVars));
         }
 
-        // Add CLI flags from checkboxes
         if ($deployment->cli_flags && is_array($deployment->cli_flags)) {
             foreach ($deployment->cli_flags as $flag) {
-                $command .= ' '.$flag;
+                if (filled($flag)) {
+                    $command .= ' '.escapeshellarg((string) $flag);
+                }
             }
         }
 
-        // Add limit hosts
         if ($deployment->limit_hosts) {
             $command .= ' --limit '.escapeshellarg($deployment->limit_hosts);
         }
 
-        // Add tags
         if ($deployment->tags) {
             $command .= ' --tags '.escapeshellarg($deployment->tags);
         }
 
-        // Add skip-tags
         if ($deployment->skip_tags) {
             $command .= ' --skip-tags '.escapeshellarg($deployment->skip_tags);
         }
 
-        // Add forks
         if ($deployment->forks) {
             $command .= ' --forks '.intval($deployment->forks);
         }
 
-        // Add start-at-task
         if ($deployment->start_at_task) {
             $command .= ' --start-at-task '.escapeshellarg($deployment->start_at_task);
         }
 
-        // Add remote user
         if ($deployment->remote_user) {
             $command .= ' --user '.escapeshellarg($deployment->remote_user);
         }
 
-        // Add extra CLI arguments from deployment
         if ($deployment->extra_args) {
-            $command .= ' '.trim($deployment->extra_args);
+            $extraArgs = trim($deployment->extra_args);
+            if (preg_match('/[;&|`$><\r\n]|\$\(/', $extraArgs)) {
+                throw new \RuntimeException('extra_args contains disallowed shell metacharacters.');
+            }
+            $command .= ' '.$extraArgs;
         }
 
         return [
@@ -811,31 +695,27 @@ class AnsibleService
     }
 
     /**
-     * Get total tasks count executing ansible-playbook with --list-tasks
+     * Estimate the task count via `ansible-playbook --list-tasks`. Heuristic:
+     * counts indented lines, so dynamic includes may be underrepresented.
      */
     protected function getTotalTasks(Deployment $deployment, string $inventoryPath, string $playbookPath): int
     {
-        // Build base ansible-playbook command with correct order
-        $command = "ansible-playbook -i {$inventoryPath} {$playbookPath} --list-tasks";
+        $binary = config('laraansible.ansible_binary', 'ansible-playbook');
+        $command = escapeshellcmd($binary).' -i '.escapeshellarg($inventoryPath).' '.escapeshellarg($playbookPath).' --list-tasks';
 
-        // Add extra vars/args if needed to ensure valid execution context, but --list-tasks might skip them.
-        // However, if variables are required for task conditional inclusion, we might need them.
         $extraVars = $this->resolveExtraVars($deployment);
         if (! empty($extraVars)) {
             $command .= ' --extra-vars '.escapeshellarg(json_encode($extraVars));
         }
 
-        // Add limit hosts
         if ($deployment->limit_hosts) {
             $command .= ' --limit '.escapeshellarg($deployment->limit_hosts);
         }
 
-        // Add tags
         if ($deployment->tags) {
             $command .= ' --tags '.escapeshellarg($deployment->tags);
         }
 
-        // Add skip-tags
         if ($deployment->skip_tags) {
             $command .= ' --skip-tags '.escapeshellarg($deployment->skip_tags);
         }
@@ -844,112 +724,9 @@ class AnsibleService
             $result = Process::run($command);
 
             if ($result->successful()) {
-                $output = $result->output();
-                // Count tasks in output.
-                // Output format:
-                //   playbook: ...
-                //     play: ...
-                //       tasks:
-                //         Task Name
-                //         Another Task
-
-                // Or:
-                // tasks:
-                //   TAGS: []
-                //   Task Name
-
-                // Simple approach: count non-empty lines under "tasks:" ??
-                // Better approach: count lines that look like task names.
-                // Actually `ansible-playbook --list-tasks` output is:
-                // playbook: playbook_1.yml
-                //   play: all
-                //     tasks:
-                //       Task 1
-                //       Task 2
-
-                $lines = explode("\n", $output);
-                $count = 0;
-                $inTasks = false;
-
-                // Regex to match task lines?
-                // They are usually indented.
-                // Let's count number of "TAGS:" lines? No, that is --list-tags.
-
-                // Let's count lines that match indentation and are not structural.
-                // A safer way: count "TASK" in standard execution log? No, we are pre-calculating.
-
-                // Let's count non-empty lines that are indented under "tasks:".
-                // But there could be multiple plays.
-
-                foreach ($lines as $line) {
-                    $trim = trim($line);
-                    if (empty($trim)) {
-                        continue;
-                    }
-
-                    // We count lines that seem to be tasks.
-                    // It's heuristic.
-                    // The reliable way is counting how many items are indented after "jobs:" or "tasks:".
-                    // But multiple plays complicates it.
-
-                    // Alternative: count 'TAGS' if we used --list-tags?
-                    // No.
-
-                    // Let's assume standard output.
-                    // "    tasks:" starts a block.
-                    // "    play:" starts a play.
-
-                    // Actually, parsing this textually is fragile.
-                    // But it's better than nothing.
-
-                    // Let's try to count lines that have significant indentation and don't start with "play:" or "tasks:".
-                    // Or, just count non-header lines.
-
-                    // Let's use a simpler heuristic for now:
-                    // Count lines that are NOT "playbook:", "play:", "tasks:".
-                    // And maybe filter out file paths/headers.
-                }
-
-                // Re-think: `ansible-playbook --list-tasks` does not guarantee 1:1 mapping with execution steps if includes/imports are dynamic.
-                // But it gives static list.
-
-                // Let's try to count lines that are NOT indented with 2 spaces (plays) or 0 spaces (playbook).
-                // Tasks are usually indented by 4 or 6 spaces.
-
                 $taskCount = 0;
-                $matches = [];
-                // Look for lines that typically represent tasks in the list output
-                // Example:
-                //     tasks:
-                //       Gathering Facts
-                //       Install package
 
-                // We count lines that are indented.
-                // But wait, "Gathering Facts" is implicit unless turned off.
-                // Deployment execution will show "TASK [Gathering Facts]".
-
-                // How about we just returning a rough estimate?
-                // Or maybe we can rely on `ansible-playbook` JSON output if available?
-                // `ANSIBLE_STDOUT_CALLBACK=json` doesn't work well with --list-tasks usually.
-
-                // Regular output counting:
-                // Count lines that are not starting with "playbook:", "play:", "tasks:".
-                // And are not empty.
-
-                // Let's refine regex.
-                // Only count typical task names? No names can be anything.
-
-                // Let's count the lines that are indented.
-                // Typically: "      Task Name"
-
-                // Let's look for "  TAGS: " if we use `--list-tasks --list-tags`?
-                // No.
-
-                // Let's just blindly count lines that are significantly indented.
-                $lines = explode("\n", $output);
-                foreach ($lines as $line) {
-                    // Check if line is a task
-                    // Usually 6 spaces indentation for tasks under a play.
+                foreach (explode("\n", $result->output()) as $line) {
                     if (preg_match('/^\s{4,}/', $line) && ! str_contains($line, 'tasks:') && ! str_contains($line, 'play:')) {
                         $taskCount++;
                     }
@@ -961,12 +738,9 @@ class AnsibleService
             Log::warning('Failed to count tasks: '.$e->getMessage());
         }
 
-        return 1; // Fallback
+        return 1;
     }
 
-    /**
-     * Determine deployment status based on play recap output.
-     */
     protected function resolveDeploymentStatus(string $output, int $exitCode): string
     {
         $recap = $this->parsePlayRecap($output);
@@ -992,11 +766,13 @@ class AnsibleService
     }
 
     /**
-     * Parse Ansible PLAY RECAP lines and return summary counts.
+     * Parse Ansible PLAY RECAP lines. A host counts as successful only when it
+     * had no failed/unreachable tasks at all.
+     *
+     * @return array{total_hosts: int, hosts_with_success: int, hosts_with_failure: int}|null
      */
     protected function parsePlayRecap(string $output): ?array
     {
-        // Strip ANSI color codes
         $output = preg_replace('/\x1b[^m]*m/', '', $output);
 
         if (! str_contains($output, 'PLAY RECAP')) {
@@ -1029,8 +805,6 @@ class AnsibleService
                 continue;
             }
 
-            // Regex to match host recap line
-            // format: hostname : ok=X changed=X unreachable=X failed=X skipped=X rescued=X ignored=X
             if (preg_match('/^(\S+)\s*:\s*ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)/', $trim, $matches)) {
                 $totalHosts++;
                 $ok = (int) $matches[2];
@@ -1045,22 +819,8 @@ class AnsibleService
                     $hostsWithFailure++;
                 }
 
-                // If a host has both failure and success (e.g. some tasks OK then failed), it counts as failure for the host status usually.
-                // But for the global status, we checking if *any* host succeeded.
-
                 if ($hasSuccess && ! $hasFailure) {
                     $hostsWithSuccess++;
-                } elseif ($hasSuccess && $hasFailure) {
-                    // Logic check: if a host partially succeeded but eventually failed, does it count towards "hostsWithSuccess"?
-                    // The goal of "warning" is: "Some hosts failed, but AT LEAST ONE host was fully successful"?
-                    // Or "Some hosts failed, but some operation succeeded"?
-
-                    // Usually "Warning" means: Mix of successful hosts and failed hosts.
-                    // If Host A fails, Host B succeeds -> Warning.
-                    // If Host A partially succeeds then fails -> Failed (for that host).
-
-                    // So we only count hostsWithSuccess if they strictly didn't fail?
-                    // Let's stick to strict success for "hostsWithSuccess".
                 }
             }
         }
@@ -1077,11 +837,8 @@ class AnsibleService
     }
 
     /**
-     * Remove a deployment's entire run directory in one shot
-     * (inventory.ini, playbook.yml, tasks/, templates/, keys/).
-     *
-     * Safe to call multiple times and confined to the ansible runs root
-     * so it can never delete an unrelated path.
+     * Remove a deployment's entire run directory. Confined to the ansible runs
+     * root so it can never delete an unrelated path.
      */
     public function cleanup(string $runDir): void
     {

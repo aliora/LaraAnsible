@@ -11,6 +11,13 @@ class LaraAnsibleSeeder extends Seeder
 {
     public function run(): void
     {
+        // Demo data only — dummy SSH key + example hosts (localhost / 192.168.x).
+        // Never seed this in production. AnsibleSetting is auto-created on first
+        // access, so prod needs no seeding at all.
+        if (! app()->environment('local', 'testing')) {
+            return;
+        }
+
         // 1. Create a Keystore (SSH Key)
         $keystore = Keystore::firstOrCreate([
             'name' => 'Default SSH Key',

@@ -19,13 +19,12 @@ class TerminalViewer extends Component
         $deployment = Deployment::find($this->deploymentId);
         $status = $deployment?->status ?? 'unknown';
 
-        // Define terminal statuses
         $isFinished = in_array($status, ['success', 'failed', 'warning']);
 
         $output = $deployment ? $deployment->readLog() : '';
 
         return view('laraansible::livewire.terminal-viewer', [
-            'output' => $output !== '' ? $output : 'Log dosyasının oluşturulması bekleniyor...',
+            'output' => $output !== '' ? $output : __('laraansible::laraansible.waiting_for_log'),
             'status' => $status,
             'isFinished' => $isFinished,
         ]);

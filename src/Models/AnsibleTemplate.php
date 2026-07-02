@@ -3,17 +3,26 @@
 namespace VisioSoft\LaraAnsible\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class AnsibleTemplate extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'name',
-        'filename',
         'content',
+        'kind',
         'description',
+        'is_active',
     ];
 
-    public function taskTemplates(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    protected $casts = [
+        'is_active' => 'boolean',
+    ];
+
+    public function taskTemplates(): BelongsToMany
     {
         return $this->belongsToMany(TaskTemplate::class);
     }

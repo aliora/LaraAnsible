@@ -4,31 +4,22 @@ namespace VisioSoft\LaraAnsible\Helpers;
 
 use Filament\Forms;
 use Filament\Schemas\Components\Group;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\TaskTemplate;
 
 class FormSchemaHelper
 {
-    /**
-     * Get a select component for task templates.
-     */
     public static function taskTemplateSelect(string $name = 'task_template_id'): Forms\Components\Select
     {
         return Forms\Components\Select::make($name)
-            ->label('Görev')
+            ->label(__('laraansible::laraansible.task'))
             ->options(fn () => TaskTemplate::where('is_active', true)->pluck('name', 'id'))
             ->searchable()
             ->required()
-            ->helperText('Çalıştırılacak Ansible görevini seçin');
+            ->helperText(__('laraansible::laraansible.task_select_help'));
     }
 
-    /**
-     * Task select (live) + a reactive group that renders the selected job's declared
-     * inputs (TaskTemplate.input_vars). Collected under the `vars` key and passed to the
-     * playbook as --extra-vars. Use in any launch modal.
-     */
     public static function jobInputsSchema(string $taskField = 'task_template_id'): array
     {
         return [
@@ -42,8 +33,11 @@ class FormSchemaHelper
     }
 
     /**
-     * Build form fields from a job's declared input definitions. Field names are
-     * "vars.<name>" so submitted values arrive under $data['vars'].
+     * Build form fields from a job's declared input definitions (TaskTemplate.input_vars).
+     *
+     * Fields must keep a flat name, a stable ->key() and ->live(): a nested
+     * "vars.<name>" statePath or a non-live select loses its value across
+     * Livewire morphs of the reactive container, arriving as null on submit.
      */
     public static function inputFieldsFor($taskTemplateId): array
     {
@@ -63,14 +57,6 @@ class FormSchemaHelper
                 continue;
             }
 
-            // Flat field name (the raw var name) — a nested "vars.<name>" statePath does
-            // not persist reliably from a reactive closure, so the value never reaches
-            // the server and ->required() wrongly fails. A stable ->key() keeps the
-            // field's state across Livewire morphs. Collected via collectInputVars().
-            // ->live() is essential: the field is rebuilt on every render of the reactive
-            // container, so its value must be committed to the server on change (a plain,
-            // non-live select only syncs on submit and the value is lost to the re-render,
-            // arriving as null). Native select (no Choices.js) binds reliably here.
             $field = Forms\Components\Select::make($name)
                 ->key('jobinput_'.$name)
                 ->options(is_array($def['options'] ?? null) ? $def['options'] : [])
@@ -90,8 +76,9 @@ class FormSchemaHelper
 
     /**
      * Collect launch-modal input values into a flat variables map for --extra-vars.
-     * Every submitted key except the reserved ones (task select / target hosts) is
-     * treated as a job input. Also folds a legacy nested `vars` array if present.
+     *
+     * Scalars are cast to string: Ansible vars are always strings, while PHP turns
+     * numeric-string select keys into ints that then mismatch string-keyed dicts.
      */
     public static function collectInputVars(array $data, array $except = ['task_template_id', 'inventory_ids']): array
     {
@@ -106,67 +93,31 @@ class FormSchemaHelper
 
         $vars = array_filter($vars, fn ($v) => $v !== null && $v !== '' && $v !== []);
 
-        // Ansible CLI/vars_prompt always yields strings; PHP turns numeric-string select
-        // keys into ints, which then mismatch string-keyed dicts (be_backends["1"] vs [1]).
-        // Cast scalars to string so --extra-vars matches what the playbook expects.
         return array_map(fn ($v) => is_scalar($v) ? (string) $v : $v, $vars);
     }
 
-    /**
-     * Get a select component for parent table (dynamic source).
-     */
     public static function parentTableSelect(string $name = 'dynamic_parent_id'): Forms\Components\Select
     {
         $setting = AnsibleSetting::getActive();
-        $options = $setting ? static::fetchParentOptions($setting) : [];
 
         return Forms\Components\Select::make($name)
-            ->label('Dinamik Kaynak')
-            ->options($options)
+            ->label(__('laraansible::laraansible.dynamic_source'))
+            ->options($setting?->parentOptions() ?? [])
             ->searchable()
-            ->helperText($setting ? "'{$setting->parent_table}' tablosundan seçim yapın" : 'Önce Ansible ayarlarını yapılandırın');
+            ->helperText($setting && $setting->parent_table
+                ? __('laraansible::laraansible.dynamic_source_help', ['table' => $setting->parent_table])
+                : __('laraansible::laraansible.configure_settings_first'));
     }
 
-    /**
-     * Fetch parent table options with caching.
-     */
-    protected static function fetchParentOptions(AnsibleSetting $setting): array
-    {
-        if (! $setting->parent_table) {
-            return [];
-        }
-
-        return Cache::remember("ansible_parent_options_{$setting->id}", 300, function () use ($setting) {
-            try {
-                $labelColumn = $setting->parent_label_column ?? 'name';
-                $parents = DB::table($setting->parent_table)->get();
-
-                $options = [];
-                foreach ($parents as $parent) {
-                    $options[$parent->id] = $parent->{$labelColumn} ?? "#{$parent->id}";
-                }
-
-                return $options;
-            } catch (\Exception $e) {
-                return [];
-            }
-        });
-    }
-
-
-    /**
-     * Format a string for display as a label.
-     * Converts "table_names" to "Table Name" and "column_names" to "Column Name".
-     */
     public static function formatLabel(?string $text, string $default = ''): string
     {
         if (blank($text)) {
             return $default;
         }
 
-        return \Illuminate\Support\Str::title(
-            \Illuminate\Support\Str::replace('_', ' ',
-                \Illuminate\Support\Str::singular($text)
+        return Str::title(
+            Str::replace('_', ' ',
+                Str::singular($text)
             )
         );
     }

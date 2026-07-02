@@ -5,11 +5,13 @@ namespace VisioSoft\LaraAnsible\Models;
 use Illuminate\Contracts\Support\Arrayable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
-use Modules\Parking\Models\Park;
 
 class Inventory extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'name',
         'description',
@@ -49,12 +51,10 @@ class Inventory extends Model
         $names = $this->name_list ?? [];
         $ips = $this->ip_list ?? [];
 
-        // If ip_list is stored as JSON string, decode it
         if (is_string($ips)) {
             $ips = json_decode($ips, true) ?? [];
         }
 
-        // If names and ips are both arrays with same count, combine them
         if (is_array($names) && is_array($ips)) {
             if (is_string($names)) {
                 $names = json_decode($names, true) ?? [];
@@ -65,17 +65,13 @@ class Inventory extends Model
             }
         }
 
-        // If ip_list is already an associative array with keys (from newer format)
         if (is_array($ips) && ! empty($ips)) {
-            // Check if it's already a key => value map
             $firstKey = array_key_first($ips);
             if ($firstKey !== 0 && is_string($firstKey)) {
-                // It's already a proper map
                 return $ips;
             }
         }
 
-        // Fallback: if lists are empty but hostname exists, show it as a single entry
         if ($this->hostname) {
             return [$this->name => $this->hostname];
         }
@@ -83,6 +79,10 @@ class Inventory extends Model
         return [];
     }
 
+    /**
+     * Persists the map into name_list/ip_list and mirrors the first IP into
+     * `hostname` for backward-compatible single-host logic.
+     */
     public function setHostsEntryAttribute($value): void
     {
         $hosts = self::normalizeHostsEntry($value);
@@ -90,13 +90,8 @@ class Inventory extends Model
         if (! empty($hosts)) {
             $this->attributes['name_list'] = json_encode(array_keys($hosts));
             $this->attributes['ip_list'] = json_encode($hosts);
-
-            // For backward compatibility and single-host logic elsewhere,
-            // set 'hostname' to the FIRST IP in the list.
-            $firstIp = reset($hosts);
-            $this->attributes['hostname'] = $firstIp;
+            $this->attributes['hostname'] = reset($hosts);
         } else {
-            // Cleared
             $this->attributes['name_list'] = null;
             $this->attributes['ip_list'] = null;
             $this->attributes['hostname'] = null;
@@ -212,8 +207,6 @@ class Inventory extends Model
         $lines[] = '';
 
         foreach ($hosts as $name => $ip) {
-            // Keep the original hostname but replace only Ansible-incompatible special chars
-            // Allow spaces, letters, numbers, dots, hyphens, underscores
             $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', self::transliterate(trim((string) $name)));
             $hostIp = trim((string) $ip);
 
@@ -303,13 +296,16 @@ class Inventory extends Model
 
     public function park(): BelongsTo
     {
-        return $this->belongsTo(Park::class);
+        return $this->belongsTo((string) config('laraansible.park_model'));
     }
 
+    /**
+     * @return array{name: ?string, hosts: array<string, string>}
+     */
     public static function parseInventoryScript(?string $script): array
     {
         $result = [
-            'name' => null, // Parent Name / Group Name
+            'name' => null,
             'hosts' => [],
         ];
 
@@ -318,7 +314,7 @@ class Inventory extends Model
         }
 
         $lines = explode("\n", $script);
-        $currentSection = 'hosts'; // default is hosts until we see a header
+        $currentSection = 'hosts';
 
         foreach ($lines as $line) {
             $line = trim($line);
@@ -334,7 +330,6 @@ class Inventory extends Model
                     $currentSection = 'children';
                 } else {
                     $currentSection = 'hosts';
-                    // If we haven't found a main name yet, use this one
                     if (! $result['name']) {
                         $result['name'] = $header;
                     }
@@ -344,12 +339,9 @@ class Inventory extends Model
             }
 
             if ($currentSection === 'hosts') {
-                // Parse host line
-                // Format: alias ansible_host=IP ... OR just IP/Hostname
                 $parts = preg_split('/\s+/', $line);
                 $alias = array_shift($parts);
 
-                // If alias contains '=', it might be a var line and not a host line (shouldn't happen in [hosts] ideally but possible)
                 if (str_contains($alias, '=')) {
                     continue;
                 }
@@ -362,12 +354,7 @@ class Inventory extends Model
                     }
                 }
 
-                if (! $ip) {
-                    // Fallback: use alias as IP/Hostname
-                    $ip = $alias;
-                }
-
-                $result['hosts'][$alias] = $ip;
+                $result['hosts'][$alias] = $ip ?: $alias;
             }
         }
 
