@@ -29,7 +29,8 @@
     },
     "autoload": {
         "psr-4": {
-            "VisioSoft\\LaraAnsible\\": "src/"
+            "VisioSoft\\LaraAnsible\\": "src/",
+            "VisioSoft\\LaraAnsible\\Database\\Seeders\\": "database/seeders/"
         }
     },
     "autoload-dev": {

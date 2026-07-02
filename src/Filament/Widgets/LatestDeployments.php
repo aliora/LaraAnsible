@@ -28,21 +28,8 @@ class LatestDeployments extends BaseWidget
                     ->label(__('laraansible::laraansible.user')),
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
-                    ->colors([
-                        'gray' => 'pending',
-                        'warning' => 'warning',
-                        'info' => 'running',
-                        'success' => 'success',
-                        'danger' => 'failed',
-                    ])
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'pending' => __('laraansible::laraansible.status_pending'),
-                        'warning' => __('laraansible::laraansible.status_warning'),
-                        'running' => __('laraansible::laraansible.status_running'),
-                        'success' => __('laraansible::laraansible.status_success'),
-                        'failed' => __('laraansible::laraansible.status_failed'),
-                        default => $state,
-                    }),
+                    ->color(fn (Deployment $record): string => $record->statusColor())
+                    ->formatStateUsing(fn (Deployment $record): string => $record->statusLabel()),
                 Tables\Columns\TextColumn::make('started_at')
                     ->dateTime()
                     ->label(__('laraansible::laraansible.started')),

@@ -2,6 +2,7 @@
 
 namespace VisioSoft\LaraAnsible\Models;
 
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -74,12 +75,62 @@ class Deployment extends Model
         return $this->belongsTo(config('auth.providers.users.model', 'App\Models\User'));
     }
 
-    /**
-     * Get the inventory items count for display.
-     */
-    public function getInventoryCountAttribute(): int
+    protected ?Collection $inventoryCache = null;
+
+    public function resolvedInventories(): Collection
     {
-        return is_array($this->inventory_ids) ? count($this->inventory_ids) : 0;
+        return $this->inventoryCache ??= Inventory::whereIn(
+            'id',
+            array_filter($this->inventory_ids ?? [], 'is_numeric')
+        )->get();
+    }
+
+    public function inventoryNames(): string
+    {
+        return $this->resolvedInventories()->pluck('name')->join(', ') ?: '—';
+    }
+
+    public function hostCount(): int
+    {
+        return (int) $this->resolvedInventories()->sum(fn (Inventory $inventory): int => $inventory->hostCount());
+    }
+
+    public function statusColor(): string
+    {
+        return match ($this->status) {
+            'warning' => 'warning',
+            'running' => 'info',
+            'success' => 'success',
+            'failed' => 'danger',
+            default => 'gray',
+        };
+    }
+
+    public function statusIcon(): string
+    {
+        return match ($this->status) {
+            'warning' => 'heroicon-o-exclamation-triangle',
+            'running' => 'heroicon-o-arrow-path',
+            'success' => 'heroicon-o-check-circle',
+            'failed' => 'heroicon-o-x-circle',
+            default => 'heroicon-o-clock',
+        };
+    }
+
+    public function statusLabel(): string
+    {
+        return static::statusOptions()[$this->status] ?? (string) $this->status;
+    }
+
+    public static function statusOptions(): array
+    {
+        return [
+            'pending' => __('laraansible::laraansible.status_pending'),
+            'warning' => __('laraansible::laraansible.status_warning'),
+            'running' => __('laraansible::laraansible.status_running'),
+            'success' => __('laraansible::laraansible.status_success'),
+            'failed' => __('laraansible::laraansible.status_failed'),
+        ];
     }
 
     /**

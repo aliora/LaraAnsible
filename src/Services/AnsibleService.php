@@ -61,14 +61,14 @@ class AnsibleService
             $this->createSharedLibraryFiles($playbookPath);
             $this->createDbLibraryFiles($playbookPath);
 
-            $commandData = $this->buildAnsibleCommand($deployment, $inventoryPath, $playbookPath);
-            Log::info("Command to execute: {$commandData['display_command']}");
+            $command = $this->buildAnsibleCommand($deployment, $inventoryPath, $playbookPath);
+            Log::info("Command to execute: {$command}");
 
             $totalTasks = max(1, $this->getTotalTasks($deployment, $inventoryPath, $playbookPath));
             Log::info("Total playbook tasks: {$totalTasks}");
 
             $commandInput = "=== Command ===\n";
-            $commandInput .= $commandData['display_command']."\n\n";
+            $commandInput .= $command."\n\n";
             $commandInput .= "=== Inventory File ({$inventoryPath}) ===\n";
             $commandInput .= file_get_contents($inventoryPath)."\n\n";
             $commandInput .= "=== Playbook File ({$playbookPath}) ===\n";
@@ -91,7 +91,7 @@ class AnsibleService
                     'ANSIBLE_HOST_KEY_CHECKING' => config('laraansible.host_key_checking') ? 'True' : 'False',
                     'ANSIBLE_PIPELINING' => 'True',
                 ])
-                ->run($commandData['wrapped_command'], function ($type, $output) use (&$outputBuffer, $totalTasks, $deployment) {
+                ->run($command, function ($type, $output) use (&$outputBuffer, $totalTasks, $deployment) {
                     $outputBuffer .= $output;
 
                     $deployment->appendLog($output);
@@ -117,6 +117,11 @@ class AnsibleService
                 });
 
             Log::info("Command executed with exit code: {$result->exitCode()}");
+
+            $deployment->refresh();
+            if ($deployment->status === 'failed') {
+                return;
+            }
 
             $deployment->update([
                 'status' => $this->resolveDeploymentStatus($result->output(), $result->exitCode()),
@@ -352,11 +357,6 @@ class AnsibleService
 
             foreach ($ungroupedInventories as $inventory) {
                 if (! empty($inventory->script) && $inventory->source_type !== 'dynamic') {
-                    foreach ($this->extractHostLinesFromInventoryScript($inventory->script) as $hostLine) {
-                        $allHosts[] = $hostLine;
-                        $content .= $hostLine."\n";
-                    }
-
                     continue;
                 }
 
@@ -635,10 +635,7 @@ class AnsibleService
         return $vars;
     }
 
-    /**
-     * @return array{display_command: string, wrapped_command: string}
-     */
-    protected function buildAnsibleCommand(Deployment $deployment, string $inventoryPath, string $playbookPath): array
+    protected function buildAnsibleCommand(Deployment $deployment, string $inventoryPath, string $playbookPath): string
     {
         $binary = config('laraansible.ansible_binary', 'ansible-playbook');
         $command = escapeshellcmd($binary).' -i '.escapeshellarg($inventoryPath).' '.escapeshellarg($playbookPath);
@@ -688,10 +685,7 @@ class AnsibleService
             $command .= ' '.$extraArgs;
         }
 
-        return [
-            'display_command' => $command,
-            'wrapped_command' => $command,
-        ];
+        return $command;
     }
 
     /**

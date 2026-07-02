@@ -179,7 +179,7 @@ class InventoryResource extends Resource
                     }),
                 Tables\Columns\TextColumn::make('host_count')
                     ->label(__('laraansible::laraansible.hosts'))
-                    ->state(fn (Inventory $record): int => count($record->hosts_entry)),
+                    ->state(fn (Inventory $record): int => $record->hostCount()),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable()

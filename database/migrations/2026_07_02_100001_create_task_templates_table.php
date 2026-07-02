@@ -6,9 +6,6 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('task_templates', function (Blueprint $table) {
@@ -18,15 +15,17 @@ return new class extends Migration
             $table->string('playbook_path')->nullable();
             $table->text('playbook_content')->nullable();
             $table->json('extra_vars')->nullable();
-            $table->string('type')->default('playbook'); // playbook, adhoc
+            $table->string('type')->default('playbook');
             $table->boolean('is_active')->default(true);
+            $table->json('input_vars')->nullable();
+            $table->json('templates')->nullable();
             $table->timestamps();
+            $table->softDeletes();
+
+            $table->index('is_active');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('task_templates');

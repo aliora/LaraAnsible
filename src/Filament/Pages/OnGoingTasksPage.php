@@ -70,28 +70,11 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->color('gray')
                     ->icon('heroicon-o-server')
                     ->limit(40)
-                    ->state(fn (Deployment $record): string => Inventory::whereIn('id', $record->inventory_ids ?? [])->pluck('name')->join(', ') ?: '—')
-                    ->tooltip(fn (Deployment $record): ?string => Inventory::whereIn('id', $record->inventory_ids ?? [])->pluck('name')->join(', ') ?: null),
+                    ->state(fn (Deployment $record): string => $record->inventoryNames())
+                    ->tooltip(fn (Deployment $record): ?string => $record->resolvedInventories()->pluck('name')->join(', ') ?: null),
                 Tables\Columns\TextColumn::make('total_hosts')
                     ->label(__('laraansible::laraansible.hosts'))
-                    ->state(function (Deployment $record): int {
-                        $inventoryIds = $record->inventory_ids ?? [];
-                        if (empty($inventoryIds)) {
-                            return 0;
-                        }
-                        $inventories = Inventory::whereIn('id', $inventoryIds)->get();
-                        $totalHosts = 0;
-                        foreach ($inventories as $inventory) {
-                            if (! empty($inventory->script)) {
-                                preg_match_all('/^([a-zA-Z0-9_.-]+)\s+ansible_host=/m', $inventory->script, $matches);
-                                $totalHosts += count($matches[1] ?? []);
-                            } elseif (! empty($inventory->hosts_entry)) {
-                                $totalHosts += count($inventory->hosts_entry);
-                            }
-                        }
-
-                        return $totalHosts;
-                    })
+                    ->state(fn (Deployment $record): int => $record->hostCount())
                     ->badge()
                     ->color('info')
                     ->suffix(' '.__('laraansible::laraansible.hosts_suffix')),
@@ -101,28 +84,9 @@ class OnGoingTasksPage extends Page implements HasTable
                 Tables\Columns\TextColumn::make('status')
                     ->label(__('laraansible::laraansible.status'))
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'warning' => 'warning',
-                        'running' => 'info',
-                        'success' => 'success',
-                        'failed' => 'danger',
-                        default => 'gray',
-                    })
-                    ->icon(fn (string $state): string => match ($state) {
-                        'warning' => 'heroicon-o-exclamation-triangle',
-                        'running' => 'heroicon-o-arrow-path',
-                        'success' => 'heroicon-o-check-circle',
-                        'failed' => 'heroicon-o-x-circle',
-                        default => 'heroicon-o-clock',
-                    })
-                    ->formatStateUsing(fn (string $state): string => match ($state) {
-                        'pending' => __('laraansible::laraansible.status_pending'),
-                        'warning' => __('laraansible::laraansible.status_warning'),
-                        'running' => __('laraansible::laraansible.status_running'),
-                        'success' => __('laraansible::laraansible.status_success'),
-                        'failed' => __('laraansible::laraansible.status_failed'),
-                        default => $state,
-                    }),
+                    ->color(fn (Deployment $record): string => $record->statusColor())
+                    ->icon(fn (Deployment $record): string => $record->statusIcon())
+                    ->formatStateUsing(fn (Deployment $record): string => $record->statusLabel()),
                 Tables\Columns\TextColumn::make('user.name')
                     ->label(__('laraansible::laraansible.started_by'))
                     ->placeholder('-'),
@@ -145,13 +109,7 @@ class OnGoingTasksPage extends Page implements HasTable
             ->filters([
                 Tables\Filters\SelectFilter::make('status')
                     ->label(__('laraansible::laraansible.status'))
-                    ->options([
-                        'pending' => __('laraansible::laraansible.status_pending'),
-                        'warning' => __('laraansible::laraansible.status_warning'),
-                        'running' => __('laraansible::laraansible.status_running'),
-                        'success' => __('laraansible::laraansible.status_success'),
-                        'failed' => __('laraansible::laraansible.status_failed'),
-                    ]),
+                    ->options(Deployment::statusOptions()),
             ])
             ->actions(TableHelper::actionGroup([
                 Actions\Action::make('watch_terminal')

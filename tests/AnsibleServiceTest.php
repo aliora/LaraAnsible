@@ -7,7 +7,7 @@ use VisioSoft\LaraAnsible\Services\AnsibleService;
 
 class AnsibleServiceTest extends TestCase
 {
-    protected function buildCommand(Deployment $deployment): array
+    protected function buildCommand(Deployment $deployment): string
     {
         $method = new \ReflectionMethod(AnsibleService::class, 'buildAnsibleCommand');
 
@@ -16,7 +16,7 @@ class AnsibleServiceTest extends TestCase
 
     public function test_builds_base_command_with_escaped_paths(): void
     {
-        $command = $this->buildCommand(new Deployment)['display_command'];
+        $command = $this->buildCommand(new Deployment);
 
         $this->assertStringStartsWith('ansible-playbook -i ', $command);
         $this->assertStringContainsString("'/runs/1/inventory.ini'", $command);
@@ -32,7 +32,7 @@ class AnsibleServiceTest extends TestCase
             'remote_user' => 'root',
         ]);
 
-        $command = $this->buildCommand($deployment)['display_command'];
+        $command = $this->buildCommand($deployment);
 
         $this->assertStringContainsString("--limit 'web'\''; rm -rf /'", $command);
         $this->assertStringContainsString("--tags 'setup,deploy'", $command);
@@ -44,7 +44,7 @@ class AnsibleServiceTest extends TestCase
     {
         $deployment = new Deployment(['cli_flags' => ['--check', '--diff; whoami']]);
 
-        $command = $this->buildCommand($deployment)['display_command'];
+        $command = $this->buildCommand($deployment);
 
         $this->assertStringContainsString("'--check'", $command);
         $this->assertStringContainsString("'--diff; whoami'", $command);
@@ -64,7 +64,7 @@ class AnsibleServiceTest extends TestCase
 
     public function test_allows_safe_extra_args(): void
     {
-        $command = $this->buildCommand(new Deployment(['extra_args' => '-vvv --timeout 30']))['display_command'];
+        $command = $this->buildCommand(new Deployment(['extra_args' => '-vvv --timeout 30']));
 
         $this->assertStringContainsString('-vvv --timeout 30', $command);
     }

@@ -39,11 +39,6 @@ class Inventory extends Model
         'port' => 'integer',
     ];
 
-    /**
-     * Virtual attribute for dynamic inventory version tracking.
-     */
-    public ?string $current_version = null;
-
     protected $appends = ['hosts_entry'];
 
     public function getHostsEntryAttribute(): array
@@ -297,6 +292,17 @@ class Inventory extends Model
     public function park(): BelongsTo
     {
         return $this->belongsTo((string) config('laraansible.park_model'));
+    }
+
+    public function hostCount(): int
+    {
+        if (filled($this->script)) {
+            preg_match_all('/^([a-zA-Z0-9_.-]+)\s+ansible_host=/m', (string) $this->script, $matches);
+
+            return count($matches[1] ?? []);
+        }
+
+        return count($this->hosts_entry);
     }
 
     /**
