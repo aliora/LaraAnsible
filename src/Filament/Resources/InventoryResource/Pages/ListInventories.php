@@ -15,6 +15,7 @@ use VisioSoft\LaraAnsible\Filament\Resources\InventoryResource;
 use VisioSoft\LaraAnsible\Helpers\FormSchemaHelper;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
 use VisioSoft\LaraAnsible\Models\Inventory;
+use VisioSoft\LaraAnsible\Services\InventoryImportService;
 
 class ListInventories extends ListRecords
 {
@@ -100,7 +101,7 @@ class ListInventories extends ListRecords
                                 Forms\Components\CheckboxList::make('child_ids')
                                     ->hiddenLabel()
                                     ->extraAlpineAttributes([
-                                        'class' => 'laraansible-hosts-checkbox-list',
+                                        'class' => 'laraansible-hosts-checkbox-list overflow-x-auto',
                                     ])
                                     ->options(function (callable $get) use ($setting) {
                                         $parentId = $get('parent_id');
@@ -127,7 +128,7 @@ class ListInventories extends ListRecords
                     ];
                 })
                 ->modalHeading(__('laraansible::laraansible.import_hosts'))
-                ->modalWidth('3xl')
+                ->modalWidth('6xl')
                 ->modalSubmitActionLabel(__('laraansible::laraansible.import_selected'))
                 ->action(function (array $data) use ($setting) {
                     if (empty($data['child_ids'])) {
@@ -144,112 +145,8 @@ class ListInventories extends ListRecords
                     }
 
                     try {
-                        $children = $setting->childrenById($data['child_ids']);
-
-                        if ($children->isEmpty()) {
-                            Notification::make()
-                                ->warning()
-                                ->title(__('laraansible::laraansible.no_hosts_found'))
-                                ->send();
-
-                            return;
-                        }
-
-                        $labelColumn = $setting->child_label_column ?? 'name';
-                        $hostnameColumn = $setting->child_hostname_column;
-                        $portColumn = $setting->child_port_column;
-                        $usernameColumn = $setting->child_username_column;
-
-                        $existingChildIds = $this->getImportedChildIds($children->pluck('id')->all());
-                        $hostsEntry = [];
-                        $importedChildIds = [];
-                        $portValues = [];
-                        $usernameValues = [];
-                        $skipped = 0;
-
-                        foreach ($children as $child) {
-                            if (in_array($child->id, $existingChildIds)) {
-                                $skipped++;
-
-                                continue;
-                            }
-
-                            $hostname = $child->{$hostnameColumn} ?? null;
-                            if (! $hostname) {
-                                $skipped++;
-
-                                continue;
-                            }
-
-                            $label = $child->{$labelColumn} ?? 'host_'.$child->id;
-                            $alias = trim((string) $label);
-                            if ($alias === '') {
-                                $alias = 'host_'.$child->id;
-                            }
-                            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', Inventory::transliterate($alias));
-
-                            $finalAlias = $alias;
-                            $suffix = 2;
-                            while (array_key_exists($finalAlias, $hostsEntry)) {
-                                $finalAlias = $alias.'_'.$suffix;
-                                $suffix++;
-                            }
-
-                            $hostsEntry[$finalAlias] = preg_replace('/[\r\n\t]+/', '', $hostname);
-                            $importedChildIds[] = $child->id;
-
-                            if ($portColumn && isset($child->{$portColumn})) {
-                                $portValues[] = $child->{$portColumn};
-                            }
-                            if ($usernameColumn && isset($child->{$usernameColumn})) {
-                                $usernameValues[] = $child->{$usernameColumn};
-                            }
-                        }
-
-                        if (empty($hostsEntry)) {
-                            Notification::make()
-                                ->warning()
-                                ->title(__('laraansible::laraansible.no_new_hosts'))
-                                ->send();
-
-                            return;
-                        }
-
-                        $portValues = array_values(array_unique(array_filter($portValues, fn ($value) => $value !== null && $value !== '')));
-                        $usernameValues = array_values(array_unique(array_filter($usernameValues, fn ($value) => $value !== null && $value !== '')));
-
-                        $port = $setting->ssh_port ?? 22;
-                        if (count($portValues) === 1) {
-                            $port = (int) $portValues[0];
-                        }
-
-                        $username = $setting->ssh_username ?? 'root';
-                        if (count($usernameValues) === 1) {
-                            $username = (string) $usernameValues[0];
-                        }
-
-                        $inventoryName = $setting->parentLabelFor($data['parent_id'] ?? null)
-                            ?? __('laraansible::laraansible.imported_hosts_name');
-
-                        $inventoryData = [
-                            'name' => $inventoryName,
-                            'port' => $port,
-                            'username' => $username,
-                            'source_type' => 'dynamic',
-                            'dynamic_child_id' => $importedChildIds[0] ?? null,
-                            'dynamic_child_ids' => $importedChildIds,
-                            'hosts_entry' => $hostsEntry,
-                            'is_active' => true,
-                        ];
-
-                        $script = Inventory::buildInventoryScriptFromData($inventoryData);
-                        if ($script !== null) {
-                            $inventoryData['script'] = $script;
-                        }
-
-                        Inventory::create($inventoryData);
-
-                        $imported = count($hostsEntry);
+                        $result = app(InventoryImportService::class)
+                            ->syncPark($data['parent_id'] ?? null, $data['child_ids']);
                     } catch (\Exception $e) {
                         Log::error('Failed to import inventory: '.$e->getMessage());
 
@@ -262,10 +159,28 @@ class ListInventories extends ListRecords
                         return;
                     }
 
+                    if (! $result['inventory']) {
+                        Notification::make()
+                            ->warning()
+                            ->title(__('laraansible::laraansible.no_hosts_found'))
+                            ->send();
+
+                        return;
+                    }
+
+                    if ($result['imported'] === 0) {
+                        Notification::make()
+                            ->warning()
+                            ->title(__('laraansible::laraansible.no_new_hosts'))
+                            ->send();
+
+                        return;
+                    }
+
                     Notification::make()
                         ->success()
                         ->title(__('laraansible::laraansible.import_completed'))
-                        ->body(__('laraansible::laraansible.import_summary', ['imported' => $imported, 'skipped' => $skipped]))
+                        ->body(__('laraansible::laraansible.import_summary', ['imported' => $result['imported'], 'skipped' => $result['skipped']]))
                         ->send();
                 }),
         ];

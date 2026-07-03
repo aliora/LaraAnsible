@@ -18,7 +18,8 @@ class DeploymentService
         int $taskTemplateId,
         ?int $userId = null,
         bool $notify = true,
-        array $extraVars = []
+        array $extraVars = [],
+        ?string $limitHosts = null
     ): Deployment {
         $deployment = Deployment::create([
             'task_template_id' => $taskTemplateId,
@@ -27,6 +28,7 @@ class DeploymentService
             'target_ip' => $this->resolveTargets($inventoryIds),
             'playbook_name' => TaskTemplate::find($taskTemplateId)?->name,
             'extra_vars' => $extraVars ?: null,
+            'limit_hosts' => $limitHosts ?: null,
             'status' => 'pending',
             'total_hosts' => count($inventoryIds),
         ]);

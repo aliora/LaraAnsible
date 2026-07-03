@@ -182,6 +182,11 @@ return [
     'run_job_on' => "Run a job on ':name'",
     'run_job_on_selected' => 'Run Job on selected hosts',
     'run_ansible_task' => 'Run Ansible Task',
+    'device_no_park' => 'This device has no assigned park; cannot resolve an inventory.',
+    'inventory_ready' => 'Inventory ready',
+    'inventory_ready_body' => ':park inventory is ready (:count hosts). This run targets: :host.',
+    'device_not_matched' => 'Device not matched',
+    'device_not_matched_body' => 'This device\'s IP was not found in the inventory. The job will run on all hosts unless you narrow it down.',
 
     'job_started' => 'Job Started',
     'job_queued_for_devices' => 'Job queued for :count device(s).',
@@ -234,6 +239,10 @@ return [
     'ssh_keys_description' => 'SSH private keys Ansible uses to connect to devices.',
     'key_name' => 'Key Name',
     'key' => 'Key',
+    'main_key' => 'Main Key',
+    'main_key_help' => 'Use this key by default for all imports and new inventories.',
+    'set_as_main' => 'Set as Main',
+    'main_key_set' => 'Main key updated.',
     'added' => 'Added',
     'add_ssh_key' => 'Add SSH Key',
     'edit_ssh_key' => 'Edit SSH Key',
@@ -259,6 +268,8 @@ return [
 
     'waiting_for_log' => 'Waiting for the log file to be created...',
     'last_update' => 'Last Update',
+    'copy' => 'Copy',
+    'copied' => 'Copied',
 
     'import_result' => ':jobs job(s), :tasks task(s), :templates template(s) imported',
     'import_result_skipped' => ', :skipped skipped',

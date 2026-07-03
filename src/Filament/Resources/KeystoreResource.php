@@ -50,6 +50,10 @@ class KeystoreResource extends Resource
                             ->label(__('laraansible::laraansible.name'))
                             ->required()
                             ->maxLength(255),
+                        Forms\Components\Toggle::make('is_main')
+                            ->label(__('laraansible::laraansible.main_key'))
+                            ->helperText(__('laraansible::laraansible.main_key_help'))
+                            ->default(fn (): bool => ! Keystore::exists()),
                         Forms\Components\Textarea::make('description')
                             ->label(__('laraansible::laraansible.description'))
                             ->rows(3)
@@ -102,6 +106,10 @@ class KeystoreResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('name')
                     ->searchable()
+                    ->sortable(),
+                Tables\Columns\IconColumn::make('is_main')
+                    ->label(__('laraansible::laraansible.main_key'))
+                    ->boolean()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('type')
                     ->badge()

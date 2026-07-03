@@ -25,7 +25,6 @@ use Filament\Tables;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
-use Illuminate\Support\Str;
 use VisioSoft\LaraAnsible\Filament\Concerns\AuthorizesAnsibleAccess;
 use VisioSoft\LaraAnsible\Helpers\TableHelper;
 use VisioSoft\LaraAnsible\Models\AnsibleSetting;
@@ -255,10 +254,10 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
                     ->label(__('laraansible::laraansible.key_name'))
                     ->searchable()
                     ->sortable(),
-                Tables\Columns\TextColumn::make('private_key')
-                    ->label(__('laraansible::laraansible.key'))
-                    ->formatStateUsing(fn (?string $state): string => Str::limit(preg_replace('/\s+/', ' ', (string) $state), 50) ?: '—')
-                    ->color('gray'),
+                Tables\Columns\IconColumn::make('is_main')
+                    ->label(__('laraansible::laraansible.main_key'))
+                    ->boolean()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label(__('laraansible::laraansible.added'))
                     ->dateTime('d.m.Y H:i')
@@ -271,6 +270,20 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
                     ->schema($this->keystoreFormSchema()),
             ])
             ->actions(TableHelper::actionGroup([
+                Action::make('set_main')
+                    ->label(__('laraansible::laraansible.set_as_main'))
+                    ->icon('heroicon-o-star')
+                    ->color('warning')
+                    ->visible(fn (Keystore $record): bool => ! $record->is_main)
+                    ->requiresConfirmation()
+                    ->action(function (Keystore $record): void {
+                        $record->update(['is_main' => true]);
+
+                        Notification::make()
+                            ->success()
+                            ->title(__('laraansible::laraansible.main_key_set'))
+                            ->send();
+                    }),
                 EditAction::make()
                     ->modalHeading(__('laraansible::laraansible.edit_ssh_key'))
                     ->schema($this->keystoreFormSchema()),
@@ -300,6 +313,10 @@ class ManageAnsibleSettings extends Page implements HasForms, HasTable
                 ->label(__('laraansible::laraansible.key_name'))
                 ->required()
                 ->placeholder('e.g. gate-prod'),
+            Forms\Components\Toggle::make('is_main')
+                ->label(__('laraansible::laraansible.main_key'))
+                ->helperText(__('laraansible::laraansible.main_key_help'))
+                ->default(fn (): bool => ! Keystore::exists()),
             Forms\Components\Textarea::make('private_key')
                 ->label(__('laraansible::laraansible.private_key_pem'))
                 ->required()

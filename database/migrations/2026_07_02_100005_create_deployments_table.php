@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('deployments')) {
+            return;
+        }
+
         Schema::create('deployments', function (Blueprint $table) {
             $table->id();
             $table->foreignId('task_template_id')->nullable()->constrained('task_templates')->nullOnDelete();

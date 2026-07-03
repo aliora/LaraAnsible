@@ -58,6 +58,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     ->orderByDesc('created_at')
             )
             ->poll('3s')
+            ->recordAction('watch_terminal')
             ->columns([
                 Tables\Columns\TextColumn::make('taskTemplate.name')
                     ->label(__('laraansible::laraansible.task'))
@@ -125,7 +126,7 @@ class OnGoingTasksPage extends Page implements HasTable
                     })
                     ->modalWidth('4xl')
                     ->modalSubmitAction(false)
-                    ->modalCancelActionLabel(__('laraansible::laraansible.close')),
+                    ->modalCancelAction(false),
                 Actions\Action::make('repeat_job')
                     ->label(__('laraansible::laraansible.repeat'))
                     ->icon('heroicon-o-arrow-path')

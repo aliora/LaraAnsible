@@ -316,7 +316,7 @@ class AnsibleService
                 }
 
                 foreach ($hostsEntry as $hostName => $hostValue) {
-                    $alias = trim((string) $hostName);
+                    $alias = Inventory::sanitizeHostAlias($hostName);
                     $hostIp = trim((string) $hostValue);
 
                     if ($alias === '' || $hostIp === '') {
@@ -366,7 +366,7 @@ class AnsibleService
                 }
 
                 foreach ($hostsEntry as $hostName => $hostValue) {
-                    $alias = trim((string) $hostName);
+                    $alias = Inventory::sanitizeHostAlias($hostName);
                     $hostIp = trim((string) $hostValue);
 
                     if ($alias === '' || $hostIp === '') {

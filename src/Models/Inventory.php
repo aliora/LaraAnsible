@@ -175,6 +175,19 @@ class Inventory extends Model
     }
 
     /**
+     * Transliterate a host label into a whitespace-free Ansible inventory alias.
+     * Ansible splits each INI host line on whitespace, so a space in the alias makes
+     * the remainder be read as key=value host vars and the whole inventory fails to
+     * parse. Dots and dashes are valid in host names and kept.
+     */
+    public static function sanitizeHostAlias(?string $value): string
+    {
+        $alias = preg_replace('/[^a-zA-Z0-9_.-]+/', '_', self::transliterate(trim((string) $value)));
+
+        return trim((string) $alias, '_');
+    }
+
+    /**
      * Transliterate then reduce to a clean Ansible group token (single underscores).
      */
     public static function ansibleGroupName(?string $value): string
@@ -202,7 +215,7 @@ class Inventory extends Model
         $lines[] = '';
 
         foreach ($hosts as $name => $ip) {
-            $alias = preg_replace('/[^a-zA-Z0-9_\.\- ]/', '_', self::transliterate(trim((string) $name)));
+            $alias = self::sanitizeHostAlias($name);
             $hostIp = trim((string) $ip);
 
             if ($alias === '' || $hostIp === '') {

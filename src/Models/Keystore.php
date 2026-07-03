@@ -14,6 +14,7 @@ class Keystore extends Model
         'name',
         'description',
         'type',
+        'is_main',
         'private_key',
         'public_key',
         'passphrase',
@@ -27,10 +28,26 @@ class Keystore extends Model
     ];
 
     protected $casts = [
+        'is_main' => 'boolean',
         'private_key' => 'encrypted',
         'passphrase' => 'encrypted',
         'password' => 'encrypted',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $keystore) {
+            if (! static::exists()) {
+                $keystore->is_main = true;
+            }
+        });
+
+        static::saving(function (self $keystore) {
+            if ($keystore->is_main) {
+                static::where('id', '!=', $keystore->id)->update(['is_main' => false]);
+            }
+        });
+    }
 
     public function inventories(): HasMany
     {

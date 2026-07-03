@@ -60,6 +60,28 @@ class InventoryTest extends TestCase
         $this->assertSame('hosts', Inventory::ansibleGroupName(null));
     }
 
+    public function test_sanitize_host_alias_removes_whitespace_and_transliterates(): void
+    {
+        $this->assertSame('3.Matbaacilar_-_756d', Inventory::sanitizeHostAlias('3.Matbaacilar - 756d'));
+        $this->assertSame('Kapali_Otopark', Inventory::sanitizeHostAlias('Kapalı Otopark'));
+        $this->assertSame('spaced_name', Inventory::sanitizeHostAlias('  spaced  name  '));
+        $this->assertSame('web1.example.com', Inventory::sanitizeHostAlias('web1.example.com'));
+    }
+
+    public function test_build_inventory_script_keeps_spaced_label_parseable(): void
+    {
+        $hosts = ['3.Matbaacilar - 756dc23f' => '100.114.121.68'];
+
+        $script = Inventory::buildInventoryScript($hosts, 'gate server', 'visioai');
+
+        $this->assertStringContainsString('3.Matbaacilar_-_756dc23f ansible_host=100.114.121.68', $script);
+        $this->assertStringNotContainsString('Matbaacilar - 756', $script);
+
+        $parsed = Inventory::parseInventoryScript($script);
+
+        $this->assertSame(['3.Matbaacilar_-_756dc23f' => '100.114.121.68'], $parsed['hosts']);
+    }
+
     public function test_build_inventory_script_roundtrips_through_parse(): void
     {
         $hosts = ['pi5' => '100.88.196.89', 'pi5-3' => '100.89.209.23'];

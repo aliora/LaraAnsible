@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('ansible_template_task_template')) {
+            return;
+        }
+
         Schema::create('ansible_template_task_template', function (Blueprint $table) {
             $table->id();
             $table->foreignId('task_template_id')->constrained('task_templates')->cascadeOnDelete();

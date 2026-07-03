@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('ansible_settings')) {
+            return;
+        }
+
         Schema::create('ansible_settings', function (Blueprint $table) {
             $table->id();
             $table->string('name')->default('default');

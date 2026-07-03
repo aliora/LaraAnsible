@@ -182,6 +182,11 @@ return [
     'run_job_on' => "':name' üzerinde görev çalıştır",
     'run_job_on_selected' => 'Seçili sunucularda görev çalıştır',
     'run_ansible_task' => 'Ansible Görevi Çalıştır',
+    'device_no_park' => 'Bu cihaza park atanmamış; envanter belirlenemiyor.',
+    'inventory_ready' => 'Envanter hazır',
+    'inventory_ready_body' => ':park envanteri hazır (:count sunucu). Bu çalıştırma hedefi: :host.',
+    'device_not_matched' => 'Cihaz eşleşmedi',
+    'device_not_matched_body' => 'Bu cihazın IP\'si envanterde bulunamadı. Daraltmazsanız görev tüm sunucularda çalışır.',
 
     'job_started' => 'Görev Başlatıldı',
     'job_queued_for_devices' => ':count cihaz için görev kuyruğa alındı.',
@@ -234,6 +239,10 @@ return [
     'ssh_keys_description' => 'Ansible\'ın cihazlara bağlanmak için kullandığı SSH özel anahtarları.',
     'key_name' => 'Anahtar Adı',
     'key' => 'Anahtar',
+    'main_key' => 'Ana Anahtar',
+    'main_key_help' => 'Bu anahtarı tüm içe aktarmalar ve yeni envanterler için varsayılan olarak kullan.',
+    'set_as_main' => 'Ana Anahtar Yap',
+    'main_key_set' => 'Ana anahtar güncellendi.',
     'added' => 'Eklenme',
     'add_ssh_key' => 'SSH Anahtarı Ekle',
     'edit_ssh_key' => 'SSH Anahtarını Düzenle',
@@ -259,6 +268,8 @@ return [
 
     'waiting_for_log' => 'Log dosyasının oluşturulması bekleniyor...',
     'last_update' => 'Son Güncelleme',
+    'copy' => 'Kopyala',
+    'copied' => 'Kopyalandı',
 
     'import_result' => ':jobs görev, :tasks task, :templates şablon aktarıldı',
     'import_result_skipped' => ', :skipped atlandı',

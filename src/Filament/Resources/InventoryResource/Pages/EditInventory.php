@@ -41,4 +41,9 @@ class EditInventory extends EditRecord
 
         return $data;
     }
+
+    protected function afterSave(): void
+    {
+        $this->fillForm();
+    }
 }
